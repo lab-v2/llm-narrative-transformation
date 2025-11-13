@@ -12,8 +12,17 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+import json
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv('.env')
+print(f"DEBUG: API key loaded: {os.getenv('OPENAI_API_KEY')[:10]}...")  # Print first 10 chars
+
 
 from story_loader import load_training_stories, load_single_story
+from llm_survey import conduct_surveys, conduct_survey_single_story
 
 # Set up logging
 logging.basicConfig(
@@ -119,15 +128,15 @@ Examples:
     parser.add_argument(
         '--model',
         type=str,
-        default='gpt-4',
-        help='LLM model to use (default: gpt-4)'
+        default='gpt-4o',
+        help='LLM model to use (default: gpt-4o)'
     )
 
     parser.add_argument(
         '--temperature',
         type=float,
-        default=0.7,
-        help='LLM temperature (default: 0.7)'
+        default=0.0,
+        help='LLM temperature (default: 0.0)'
     )
 
     # General options
@@ -238,14 +247,34 @@ def run_phase1(args):
     logger.info(f"Loaded {len(stories)} training stories")
 
     # TODO: Import and call llm_survey.py (unless skipping)
-    # if not args.skip_survey:
-    #     from llm_survey import conduct_surveys
-    #     survey_results = conduct_surveys(stories, args.model, args.temperature)
-    #     # Save survey results
-    #     save_survey_results(survey_results, args.output_dir)
-    # else:
-    #     # Load existing survey results
-    #     survey_results = load_survey_results(args.survey_results)
+    # Determine questions file path based on problem type
+    if args.problem == "forward":
+        questions_file = Path(args.data_dir) / "individualistic_questions.json"
+    else:  # inverse
+        questions_file = Path(args.data_dir) / "collectivistic_questions.json"
+
+    if not questions_file.exists():
+        logger.error(f"Questions file not found: {questions_file}")
+        sys.exit(1)
+
+    # Conduct surveys (or load existing)
+    if not args.skip_survey:
+        survey_results, failed_stories = conduct_surveys(
+            stories=stories,
+            questions_file=str(questions_file),
+            problem_type=args.problem,
+            model=args.model,
+            temperature=args.temperature,
+            output_dir=args.output_dir
+        )
+
+        if failed_stories:
+            logger.warning(f"{len(failed_stories)} stories failed. Check failed_stories.json")
+    else:
+        # Load existing survey results
+        logger.info(f"Loading existing survey results from {args.survey_results}")
+        with open(args.survey_results, 'r') as f:
+            survey_results = json.load(f)
 
     # TODO: Import and call graph_builder.py
     # from graph_builder import build_knowledge_graph
@@ -287,13 +316,24 @@ def run_phase2(args):
     # logger.info(f"Loaded {len(rules)} rules")
 
     # TODO: Import and load test story
-    # from story_loader import load_single_story
     # story = load_single_story(args.story)
     # logger.info(f"Loaded test story: {story['name']}")
 
     # TODO: Import and conduct survey on test story
-    # from llm_survey import conduct_survey_single_story
-    # initial_survey = conduct_survey_single_story(story, args.model, args.temperature, args.problem)
+    # # Determine questions file path
+    # if args.problem == "forward":
+    #     questions_file = Path(args.data_dir) / "collectivistic_questions.json"  # Note: opposite for test
+    # else:
+    #     questions_file = Path(args.data_dir) / "individualistic_questions.json"
+    #
+    # # Conduct survey on test story
+    # initial_survey = conduct_survey_single_story(
+    #     story=story,
+    #     questions_file=str(questions_file),
+    #     problem_type=args.problem,
+    #     model=args.model,
+    #     temperature=args.temperature
+    # )
     # logger.info(f"Initial survey completed")
 
     # TODO: Import and run abduction algorithm
