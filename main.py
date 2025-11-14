@@ -22,7 +22,8 @@ print(f"DEBUG: API key loaded: {os.getenv('OPENAI_API_KEY')[:10]}...")  # Print 
 
 
 from story_loader import load_training_stories, load_single_story
-from llm_survey import conduct_surveys, conduct_survey_single_story
+from llm_survey import conduct_surveys, conduct_survey_single_story, sanitize_model_name
+from rule_learner import learn_rules
 
 # Set up logging
 logging.basicConfig(
@@ -196,13 +197,14 @@ def validate_arguments(args):
     """
     # Phase 1 validation
     if args.phase == 1:
-        if args.skip_survey and not args.survey_results:
-            logger.error("--survey-results is required when using --skip-survey")
-            return False
+        # Only check for data_dir if not skipping survey
+        if not args.skip_survey:
+            if not Path(args.data_dir).exists():
+                logger.error(f"Data directory not found: {args.data_dir}")
+                return False
 
-        if not Path(args.data_dir).exists():
-            logger.error(f"Data directory not found: {args.data_dir}")
-            return False
+        # No need to validate survey_results for Phase 1
+        # (we load from output_dir structure instead)
 
     # Phase 2 validation
     if args.phase == 2:
@@ -232,8 +234,7 @@ def run_phase1(args):
     This phase:
     1. Loads training stories (individualistic or collectivistic based on problem)
     2. Conducts LLM surveys on each story (20 features)
-    3. Builds knowledge graph from survey results
-    4. Learns PyReason rules from knowledge graph
+    3. Learns PyReason rules from survey results
 
     Args:
         args: Command line arguments
@@ -242,23 +243,24 @@ def run_phase1(args):
     logger.info("PHASE 1: TRAINING")
     logger.info("=" * 60)
 
-    # TODO: Import and call story_loader.py
-    stories = load_training_stories(args.data_dir, args.problem)
-    logger.info(f"Loaded {len(stories)} training stories")
 
-    # TODO: Import and call llm_survey.py (unless skipping)
-    # Determine questions file path based on problem type
-    if args.problem == "forward":
-        questions_file = Path(args.data_dir) / "individualistic_questions.json"
-    else:  # inverse
-        questions_file = Path(args.data_dir) / "collectivistic_questions.json"
-
-    if not questions_file.exists():
-        logger.error(f"Questions file not found: {questions_file}")
-        sys.exit(1)
-
-    # Conduct surveys (or load existing)
     if not args.skip_survey:
+        # TODO: Import and call story_loader.py
+        stories = load_training_stories(args.data_dir, args.problem)
+        logger.info(f"Loaded {len(stories)} training stories")
+
+        # TODO: Import and call llm_survey.py (unless skipping)
+        # Determine questions file path based on problem type
+        if args.problem == "forward":
+            questions_file = Path(args.data_dir) / "individualistic_questions.json"
+        else:  # inverse
+            questions_file = Path(args.data_dir) / "collectivistic_questions.json"
+
+        if not questions_file.exists():
+            logger.error(f"Questions file not found: {questions_file}")
+            sys.exit(1)
+
+
         survey_results, failed_stories = conduct_surveys(
             stories=stories,
             questions_file=str(questions_file),
@@ -272,22 +274,29 @@ def run_phase1(args):
             logger.warning(f"{len(failed_stories)} stories failed. Check failed_stories.json")
     else:
         # Load existing survey results
-        logger.info(f"Loading existing survey results from {args.survey_results}")
-        with open(args.survey_results, 'r') as f:
-            survey_results = json.load(f)
+        logger.info("Skipping survey step (--skip-survey flag set)")
+        # with open(args.survey_results, 'r') as f:
+        #     survey_results = json.load(f)
 
-    # TODO: Import and call graph_builder.py
-    # from graph_builder import build_knowledge_graph
-    # knowledge_graph = build_knowledge_graph(survey_results, args.problem)
-    # # Save knowledge graph
-    # save_knowledge_graph(knowledge_graph, args.output_dir)
 
     # TODO: Import and call rule_learner.py
-    # from rule_learner import learn_rules
-    # rules = learn_rules(knowledge_graph)
-    # # Save learned rules
-    # save_rules(rules, args.output_dir)
+    # Learn PyReason rules from survey results
 
+    sanitized_model = sanitize_model_name(args.model)
+    survey_results_dir = Path(args.output_dir) / sanitized_model / args.problem / "survey_results"
+
+    logger.info("\n" + "=" * 60)
+    logger.info("Step 4: Learning PyReason Rules")
+    logger.info("=" * 60)
+
+    rules_file = learn_rules(
+        survey_results_dir=str(survey_results_dir),
+        problem_type=args.problem,
+        model=args.model,
+        output_dir=args.output_dir
+    )
+
+    logger.info(f"\n✓ Rules learned and saved to: {rules_file}")
     logger.info("\nPhase 1 completed successfully!")
     logger.info(f"Output directory: {args.output_dir}")
 
