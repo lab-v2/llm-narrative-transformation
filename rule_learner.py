@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import defaultdict
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -75,16 +76,23 @@ def feature_to_predicate(feature: str) -> str:
     """
     Convert feature name to predicate format.
 
-    Replaces spaces and hyphens with underscores, converts to lowercase.
+    Replaces spaces, hyphens, and special characters with underscores, converts to lowercase.
+    Must match the format used in graph_builder.py
 
     Args:
-        feature: Feature name (e.g., "Internal Goals")
+        feature: Feature name (e.g., "Internal Goals", "Man vs. Self/World")
 
     Returns:
-        Predicate format (e.g., "internal_goals")
+        Predicate format (e.g., "internal_goals", "man_vs_self_world_conflict")
     """
-    return feature.replace(' ', '_').replace('-', '_').replace('‑', '_').lower()
+    # Replace all non-alphanumeric characters (except spaces) with underscores
+    cleaned = re.sub(r'[^\w\s]', '_', feature)
 
+    # Replace multiple spaces/underscores with single underscore
+    cleaned = re.sub(r'[\s_]+', '_', cleaned)
+
+    # Lowercase and strip leading/trailing underscores
+    return cleaned.lower().strip('_')
 
 # ==========================================================
 # Survey Loading

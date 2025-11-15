@@ -22,8 +22,12 @@ print(f"DEBUG: API key loaded: {os.getenv('OPENAI_API_KEY')[:10]}...")  # Print 
 
 
 from story_loader import load_training_stories, load_single_story
-from llm_survey import conduct_surveys, conduct_survey_single_story, sanitize_model_name
+from llm_survey import conduct_surveys, conduct_survey_single_story, sanitize_model_name, CostTracker
 from rule_learner import learn_rules
+from graph_builder import build_ground_atoms_from_survey, save_ground_atoms, save_segments_metadata
+from pyreason_runner import run_pyreason
+from abduction import run_abduction
+from story_transformer import transform_story_iteratively
 
 # Set up logging
 logging.basicConfig(
@@ -96,7 +100,7 @@ Examples:
     parser.add_argument(
         '--skip-survey',
         action='store_true',
-        help='[Phase 1] Skip LLM survey step and load existing results'
+        help='Skip LLM survey step and use existing results (works for both Phase 1 and Phase 2)'
     )
 
     parser.add_argument(
@@ -107,12 +111,6 @@ Examples:
 
     # Phase 2 specific arguments
     parser.add_argument(
-        '--rules',
-        type=str,
-        help='[Phase 2] Path to learned rules file from Phase 1'
-    )
-
-    parser.add_argument(
         '--story',
         type=str,
         help='[Phase 2] Path to test story file to transform'
@@ -121,8 +119,22 @@ Examples:
     parser.add_argument(
         '--max-iterations',
         type=int,
-        default=5,
-        help='[Phase 2] Maximum transformation iterations (default: 5)'
+        default=3,
+        help='[Phase 2] Maximum transformation iterations (default: 3)'
+    )
+
+    parser.add_argument(
+        '--top-k',
+        type=int,
+        default=3,
+        help='[Phase 2] Number of top features to transform per iteration (default: 3)'
+    )
+
+    parser.add_argument(
+        '--rules',
+        type=str,
+        default=None,
+        help='[Phase 2] Path to learned rules file (optional - auto-determined if not provided)'
     )
 
     # LLM configuration
@@ -208,22 +220,16 @@ def validate_arguments(args):
 
     # Phase 2 validation
     if args.phase == 2:
-        if not args.rules:
-            logger.error("--rules is required for Phase 2")
-            return False
-
         if not args.story:
             logger.error("--story is required for Phase 2")
-            return False
-
-        if not Path(args.rules).exists():
-            logger.error(f"Rules file not found: {args.rules}")
             return False
 
         if not Path(args.story).exists():
             logger.error(f"Story file not found: {args.story}")
             return False
 
+        # Rules path will be auto-determined if not provided
+        # No need to validate here
     return True
 
 
@@ -245,11 +251,11 @@ def run_phase1(args):
 
 
     if not args.skip_survey:
-        # TODO: Import and call story_loader.py
+        #   : Import and call story_loader.py
         stories = load_training_stories(args.data_dir, args.problem)
         logger.info(f"Loaded {len(stories)} training stories")
 
-        # TODO: Import and call llm_survey.py (unless skipping)
+        #   : Import and call llm_survey.py (unless skipping)
         # Determine questions file path based on problem type
         if args.problem == "forward":
             questions_file = Path(args.data_dir) / "individualistic_questions.json"
@@ -279,7 +285,7 @@ def run_phase1(args):
         #     survey_results = json.load(f)
 
 
-    # TODO: Import and call rule_learner.py
+    #   : Import and call rule_learner.py
     # Learn PyReason rules from survey results
 
     sanitized_model = sanitize_model_name(args.model)
@@ -306,11 +312,14 @@ def run_phase2(args):
     Execute Phase 2: Testing/Transformation - Transform test story.
 
     This phase:
-    1. Loads learned rules from Phase 1
-    2. Conducts LLM survey on test story
-    3. Runs abduction algorithm to prioritize features to change
-    4. Iteratively transforms story using LLM prompts
-    5. Selects best iteration based on average rating
+    1. Loads test story
+    2. Iteratively:
+       - Surveys story
+       - Builds ground atoms
+       - Runs PyReason
+       - Runs abduction
+       - Transforms story
+    3. Selects best iteration
 
     Args:
         args: Command line arguments
@@ -319,59 +328,222 @@ def run_phase2(args):
     logger.info("PHASE 2: TESTING/TRANSFORMATION")
     logger.info("=" * 60)
 
-    # TODO: Import and load learned rules
-    # from rule_learner import load_rules
-    # rules = load_rules(args.rules)
-    # logger.info(f"Loaded {len(rules)} rules")
+    # Step 1: Load test story
+    logger.info("\n[Step 1/7] Loading test story...")
+    story = load_single_story(args.story)
+    logger.info(f"✓ Loaded test story: {story['name']}")
 
-    # TODO: Import and load test story
-    # story = load_single_story(args.story)
-    # logger.info(f"Loaded test story: {story['name']}")
+    # Step 2: Load learned rules from Phase 1
+    logger.info("\n[Step 2/7] Loading learned rules...")
 
-    # TODO: Import and conduct survey on test story
-    # # Determine questions file path
-    # if args.problem == "forward":
-    #     questions_file = Path(args.data_dir) / "collectivistic_questions.json"  # Note: opposite for test
-    # else:
-    #     questions_file = Path(args.data_dir) / "individualistic_questions.json"
-    #
-    # # Conduct survey on test story
-    # initial_survey = conduct_survey_single_story(
-    #     story=story,
-    #     questions_file=str(questions_file),
-    #     problem_type=args.problem,
-    #     model=args.model,
-    #     temperature=args.temperature
-    # )
-    # logger.info(f"Initial survey completed")
+    # Auto-determine rules path if not provided
+    if args.rules:
+        rules_file = Path(args.rules)
+    else:
+        # Default: output/phase1/{model}/{problem}/learned_rules/pyreason_rules.txt
+        sanitized_model = sanitize_model_name(args.model)
+        rules_file = Path("output/phase1") / sanitized_model / args.problem / "learned_rules" / "pyreason_rules.txt"
+        logger.info(f"Auto-determined rules path: {rules_file}")
 
-    # TODO: Import and run abduction algorithm
-    # from abduction import run_abduction
-    # feature_priorities = run_abduction(initial_survey, rules)
-    # logger.info(f"Identified {len(feature_priorities)} features to modify")
+    if not rules_file.exists():
+        logger.error(f"Rules file not found: {rules_file}")
+        logger.error("Please ensure Phase 1 has been run for this model and problem type,")
+        logger.error("or provide explicit --rules path")
+        sys.exit(1)
 
-    # TODO: Import and run transformation iterations
-    # from story_transformer import transform_story_iteratively
-    # results = transform_story_iteratively(
-    #     story=story,
-    #     feature_priorities=feature_priorities,
-    #     rules=rules,
-    #     max_iterations=args.max_iterations,
-    #     model=args.model,
-    #     temperature=args.temperature,
-    #     target_problem=args.problem
-    # )
+    logger.info(f"✓ Rules loaded from: {rules_file}")
 
-    # TODO: Select best iteration
-    # best_iteration = select_best_iteration(results)
-    # logger.info(f"Best iteration: {best_iteration['iteration_num']}")
-    # logger.info(f"Average rating: {best_iteration['avg_rating']:.2f}")
+    # Create output directory structure
+    sanitized_model = sanitize_model_name(args.model)
+    story_output_dir = Path(args.output_dir) / "phase2" / sanitized_model / args.problem / story['name']
+    story_output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"✓ Output directory: {story_output_dir}")
 
-    # TODO: Save transformed story
-    # save_transformed_story(best_iteration['story'], args.output_dir)
+    # Initialize cost tracker for this story
+    cost_tracker = CostTracker(args.model)
+    logger.info("✓ Cost tracker initialized")
 
-    logger.info("\nPhase 2 completed successfully!")
-    logger.info(f"Output directory: {args.output_dir}")
+
+    # Determine questions file based on problem type
+    # Forward problem: always use individualistic questions (whether training or testing)
+    # Inverse problem: always use collectivistic questions (whether training or testing)
+    if args.problem == "forward":
+        questions_file = Path(args.data_dir) / "individualistic_questions.json"
+    else:  # inverse
+        questions_file = Path(args.data_dir) / "collectivistic_questions.json"
+
+    if not questions_file.exists():
+        logger.error(f"Questions file not found: {questions_file}")
+        sys.exit(1)
+
+    # Initialize: current story starts as the original test story
+    current_story_text = story['content']
+    current_story_path = story['path']
+
+    # Main iteration loop
+    for iteration in range(args.max_iterations):
+        logger.info("\n" + "=" * 60)
+        logger.info(f"ITERATION {iteration + 1}/{args.max_iterations}")
+        logger.info("=" * 60)
+
+        # Create iteration directory
+        iter_dir = story_output_dir / f"iteration_{iteration}"
+        iter_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save current story text
+        story_file = iter_dir / "story.txt"
+        story_file.write_text(current_story_text, encoding='utf-8')
+        logger.info(f"✓ Saved current story to: {story_file}")
+
+        # Step 3: Survey current story (or load existing)
+        survey_file = iter_dir / "survey.json"
+
+        if args.skip_survey and survey_file.exists():
+            logger.info(f"\n[Step 3/7] Loading existing survey (--skip-survey)...")
+            with open(survey_file, 'r', encoding='utf-8') as f:
+                survey_result = json.load(f)
+            logger.info(f"✓ Survey loaded from: {survey_file}")
+        else:
+            logger.info(f"\n[Step 3/7] Surveying story (iteration {iteration})...")
+
+            # Create temporary story dict for survey
+            temp_story = {
+                'name': story['name'],
+                'path': str(story_file),
+                'content': current_story_text
+            }
+
+            survey_result = conduct_survey_single_story(
+                story=temp_story,
+                questions_file=str(questions_file),
+                problem_type=args.problem,
+                model=args.model,
+                temperature=args.temperature,
+                cost_tracker=cost_tracker
+            )
+
+            # Save survey result
+            with open(survey_file, 'w', encoding='utf-8') as f:
+                json.dump(survey_result, f, indent=2, ensure_ascii=False)
+            logger.info(f"✓ Survey completed and saved to: {survey_file}")
+
+        # Save cost tracking for this iteration
+        iter_cost_file = iter_dir / "cost_tracking.json"
+        cost_tracker.save(iter_cost_file)
+        logger.info(f"✓ Cost tracking saved to: {iter_cost_file}")
+
+        #   : Step 4: Build ground atoms from survey
+        # Step 4: Build ground atoms from survey
+        logger.info(f"\n[Step 4/7] Building ground atoms from survey...")
+
+        ground_atoms, segments_metadata = build_ground_atoms_from_survey(
+            survey_json_path=str(survey_file),
+            story_name=story['name']
+        )
+
+        # Save ground atoms
+        ground_atoms_file = iter_dir / "ground_atoms.json"
+        save_ground_atoms(ground_atoms, str(ground_atoms_file))
+        logger.info(f"✓ Ground atoms saved: {len(ground_atoms)} atoms")
+
+        # Save segments metadata
+        segments_metadata_file = iter_dir / "segments_metadata.json"
+        save_segments_metadata(segments_metadata, str(segments_metadata_file))
+        logger.info(f"✓ Segments metadata saved: {len(segments_metadata)} features")
+        #   : Step 5: Run PyReason
+        # Step 5: Run PyReason with ground atoms and rules
+        logger.info(f"\n[Step 5/7] Running PyReason...")
+
+        trace_dir = run_pyreason(
+            ground_atoms=ground_atoms,
+            rules_file=str(rules_file),
+            story_name=story['name'],
+            output_dir=str(iter_dir)
+        )
+
+        logger.info(f"✓ PyReason traces saved to: {trace_dir}")
+        #   : Step 6: Run abduction
+        # Step 6: Run abduction to prioritize features
+        logger.info(f"\n[Step 6/7] Running abduction analysis...")
+
+        # Find the trace CSV file
+        trace_files = sorted(Path(trace_dir).glob("rule_trace_edges_*.csv"))
+        if not trace_files:
+            logger.error("No trace CSV files found from PyReason")
+            sys.exit(1)
+
+        trace_csv_path = str(trace_files[0])  # Use most recent
+        logger.debug(f"Using trace file: {trace_files[0].name}")
+
+        abduction_file, prescriptions_file, stop_condition_met = run_abduction(
+            trace_csv_path=trace_csv_path,
+            rules_file=str(rules_file),
+            ground_atoms=ground_atoms,
+            segments_metadata=segments_metadata,
+            output_dir=str(iter_dir),
+            gap_threshold=0.01
+        )
+
+        logger.info(f"✓ Abduction analysis saved to: {abduction_file}")
+        logger.info(f"✓ Ranked prescriptions saved to: {prescriptions_file}")
+
+        # Check stop condition
+        if stop_condition_met:
+            logger.info("\n🛑 Stop condition met - all gaps < 0.01")
+            logger.info("No further transformation needed!")
+            break  # Exit iteration loop
+        #   : Step 7: Transform story
+        # Step 7: Transform story using top-k features
+        logger.info(f"\n[Step 7/7] Transforming story (top-{args.top_k} features)...")
+
+        transformed_story, log_file, cost_file = transform_story_iteratively(
+            story_text=current_story_text,
+            prescriptions_file=prescriptions_file,
+            top_k=args.top_k,
+            problem_type=args.problem,
+            model=args.model,
+            temperature=args.temperature,
+            output_dir=str(iter_dir)
+        )
+
+        logger.info(f"✓ Story transformed")
+        logger.info(f"✓ Transformation log: {log_file}")
+        logger.info(f"✓ Transformation costs: {cost_file}")
+
+        # Update current story for next iteration
+        current_story_text = transformed_story
+
+        # # For now, break after first iteration (we'll add more steps later)
+        # logger.info("\n⚠️  Only survey step implemented so far. Breaking after iteration 0.")
+        # break
+    # After the for loop ends, before "Phase 2 completed!"
+    # Combine survey and transformation costs
+    logger.info("\n" + "=" * 60)
+    logger.info("PHASE 2 FINAL COST SUMMARY")
+    logger.info("=" * 60)
+
+    # This will show combined costs from survey + transformation
+    # (Both cost trackers save separately, we just log summary here)
+
+    # Save final cost summary for entire story transformation
+    final_cost_file = story_output_dir / "cost_tracking_final.json"
+    cost_tracker.save(final_cost_file)
+
+    logger.info("\n" + "=" * 60)
+    logger.info("PHASE 2 COST SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"Total stories processed: 1")
+    logger.info(f"Total iterations: {iteration + 1}")
+    logger.info(f"Total cost: ${cost_tracker.total_cost:.4f}")
+    logger.info(f"Total tokens: {cost_tracker.total_input_tokens + cost_tracker.total_output_tokens:,}")
+    logger.info(f"  - Input: {cost_tracker.total_input_tokens:,}")
+    logger.info(f"  - Output: {cost_tracker.total_output_tokens:,}")
+    logger.info(f"Cost tracking saved to: {final_cost_file}")
+    logger.info("=" * 60)
+
+    logger.info("\nPhase 2 completed!")
+    logger.info(f"Output directory: {story_output_dir}")
+
 
 
 if __name__ == "__main__":
