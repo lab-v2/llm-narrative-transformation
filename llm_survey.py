@@ -48,7 +48,8 @@ logger = logging.getLogger(__name__)
 # Pricing per 1K tokens (adjust as needed)
 MODEL_PRICING = {
     # OpenAI
-    "gpt-4o": {"input": 0.0025, "output": 0.01}
+    "gpt-4o": {"input": 0.0025, "output": 0.01},
+    "xai/grok-4-fast-reasoning": {"input": 0.0002, "output": 0.0005}
 
     # # Anthropic
     # "claude-3-opus": {"input": 0.015, "output": 0.075},
