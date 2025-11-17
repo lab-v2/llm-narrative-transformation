@@ -457,6 +457,9 @@ def conduct_survey_single_story(
             "Put the rating FIRST (e.g., 'Rating: 4'), THEN justify. "
             "Finally, quote a few short excerpts from the story that exemplify your chosen rating."
         )
+        # Add explicit format instruction for non-GPT models
+        if not model.startswith("gpt-"):
+            user_prompt += " Format excerpts as a numbered list: 1. \"excerpt\", 2. \"excerpt\", etc."
 
         try:
             # Call LLM with retry logic

@@ -217,8 +217,8 @@ def build_ground_atoms_from_survey(
 
     for qa in qa_list:
         # Only process individualistic questions (Phase 2 uses same format)
-        if qa.get('type') != 'individualistic_question':
-            continue
+        # if qa.get('type') != 'individualistic_question':
+        #     continue
 
         component = qa.get('component', '')
         if not component:

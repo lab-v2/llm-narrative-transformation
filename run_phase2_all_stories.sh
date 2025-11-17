@@ -11,7 +11,7 @@
 
 # Phase 2 parameters
 PHASE=2
-PROBLEM="forward"
+PROBLEM="inverse"
 MODEL="gpt-4o"
 MAX_ITERATIONS=3
 TOP_K=20
@@ -25,7 +25,7 @@ OUTPUT_DIR="output"
 if [ "$PROBLEM" == "forward" ]; then
     STORIES_DIR="data/collectivistic-stories-all"
 else
-    STORIES_DIR="data/individualistic-rags-to-riches-stories"
+    STORIES_DIR="data/individualistic-rags-to-riches-stories-subset"
 fi
 
 # ==========================================================
