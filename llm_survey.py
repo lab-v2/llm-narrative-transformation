@@ -49,7 +49,13 @@ logger = logging.getLogger(__name__)
 MODEL_PRICING = {
     # OpenAI
     "gpt-4o": {"input": 0.0025, "output": 0.01},
-    "xai/grok-4-fast-reasoning": {"input": 0.0002, "output": 0.0005}
+    "xai/grok-4-fast-reasoning": {"input": 0.0002, "output": 0.0005},
+    # Anthropic Claude
+    "claude-sonnet-4-5": {"input": 0.003, "output": 0.015},  # $3/$15 per 1M = $0.003/$0.015 per 1K
+
+    # AWS Bedrock - Meta Llama
+    "bedrock/us.meta.llama4-maverick-17b-instruct-v1:0": {"input": 0.00024, "output": 0.00097},
+    "meta.llama4": {"input": 0.00024, "output": 0.00097},  # Fallback
 
     # # Anthropic
     # "claude-3-opus": {"input": 0.015, "output": 0.075},

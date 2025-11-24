@@ -1,24 +1,53 @@
+"""
+Cosine Similarity Computation Script
+
+Computes cosine similarity between original and transformed stories
+using OpenAI embeddings. Measures how much stories changed.
+
+Processes all available iterations and saves embeddings for reuse.
+
+Output: CSV and embeddings saved to output_analysis/embeddings/{model}/{problem}/
+"""
+
 import os
+import json
 import argparse
+import logging
 from pathlib import Path
 import pandas as pd
-from openai import OpenAI
-from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
+try:
+    from openai import OpenAI
+except ImportError:
+    raise ImportError("openai required. Install with: pip install openai")
+
+try:
+    from sklearn.metrics.pairwise import cosine_similarity
+except ImportError:
+    raise ImportError("scikit-learn required. Install with: pip install scikit-learn")
+
 from dotenv import load_dotenv
-load_dotenv('.env')
-print(f"DEBUG: API key loaded: {os.getenv('OPENAI_API_KEY')[:10]}...")  # Print first 10 chars
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+# ==========================================================
+# Utility Functions
+# ==========================================================
+
 def read_file(filepath):
     """Read text file and return content"""
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
-        print(f"Warning: File not found - {filepath}")
+        logger.warning(f"File not found: {filepath}")
         return None
     except Exception as e:
-        print(f"Error reading {filepath}: {e}")
+        logger.error(f"Error reading {filepath}: {e}")
         return None
 
 
@@ -28,12 +57,12 @@ def get_embeddings(text, client):
         return None
     try:
         response = client.embeddings.create(
-            model="text-embedding-3-small",  # or "text-embedding-3-large" for better quality
+            model="text-embedding-3-large",
             input=text
         )
         return np.array(response.data[0].embedding)
     except Exception as e:
-        print(f"Error generating embedding: {e}")
+        logger.error(f"Error generating embedding: {e}")
         return None
 
 
@@ -41,113 +70,244 @@ def compute_cosine_sim(emb1, emb2):
     """Compute cosine similarity between two embeddings"""
     if emb1 is None or emb2 is None:
         return None
-    # Reshape for sklearn cosine_similarity
     emb1 = emb1.reshape(1, -1)
     emb2 = emb2.reshape(1, -1)
     return cosine_similarity(emb1, emb2)[0][0]
 
 
-def process_stories(phase, model_name, problem_type, output_csv='cosine_similarities.csv'):
+# ==========================================================
+# Main Processing
+# ==========================================================
+
+def process_stories(model_name, problem_type, output_dir='output_analysis/embeddings'):
     """
-    Process all stories and compute cosine similarities
+    Process all stories and compute cosine similarities for all iterations.
 
     Args:
-        phase: e.g., 'phase2'
-        model_name: e.g., 'gpt-4o'
-        problem_type: e.g., 'forward'
-        output_csv: output CSV filename
+        model_name: e.g., 'gpt-4o', 'claude-sonnet-4-5'
+        problem_type: 'forward' or 'inverse'
+        output_dir: Base output directory
     """
+    logger.info("=" * 60)
+    logger.info("COSINE SIMILARITY COMPUTATION")
+    logger.info("=" * 60)
+    logger.info(f"Model: {model_name}")
+    logger.info(f"Problem: {problem_type}")
+
     # Initialize OpenAI client
-    print("Initializing OpenAI client...")
+    logger.info("\nInitializing OpenAI client...")
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    print("Client initialized successfully!\n")
+
+    # Determine original story directory based on problem type
+    if problem_type == "forward":
+        original_dir = Path('data/collectivistic-stories-all')
+    else:  # inverse
+        original_dir = Path('data/individualistic-rags-to-riches-stories')
+
+    logger.info(f"Original stories directory: {original_dir}")
+
+    # Sanitize model name
+    sanitized_model = model_name.replace("/", "-").replace(":", "-")
 
     # Base paths
-    original_dir = Path('data/individualistic-rags-to-riches-stories-subset')
-    abduction_base = Path(f'output/{phase}/{model_name}/{problem_type}')
-    baseline_base = Path(f'output/baseline/{model_name}/{problem_type}')
+    abduction_base = Path(f'output/phase2/{sanitized_model}/{problem_type}')
+    baseline_base = Path(f'output/baseline/{sanitized_model}/{problem_type}')
 
-    print(original_dir)
-    # Get all story files from original directory
-    story_files = list(original_dir.glob('*.txt'))
+    # Get all story directories from abduction
+    story_dirs = [d for d in abduction_base.iterdir() if d.is_dir()]
 
-    if not story_files:
-        print(f"No story files found in {original_dir}")
+    if not story_dirs:
+        logger.error(f"No story directories found in {abduction_base}")
         return
 
-    print(f"Found {len(story_files)} stories to process\n")
+    logger.info(f"Found {len(story_dirs)} stories to process\n")
 
     results = []
+    all_embeddings = {}
 
-    for idx, original_path in enumerate(story_files, 1):
-        story_name = original_path.stem  # filename without extension
-        print(f"[{idx}/{len(story_files)}] Processing: {story_name}")
+    for idx, story_dir in enumerate(sorted(story_dirs), 1):
+        story_name = story_dir.name
+        logger.info(f"[{idx}/{len(story_dirs)}] Processing: {story_name}")
 
-        # Construct file paths
-        abduction_path = abduction_base / story_name / 'iteration_1' / 'story_transformed.txt'
-        baseline_path = baseline_base / story_name / 'transformed_story.txt'
+        # Find original story
+        original_path = original_dir / f"{story_name}.txt"
+        if not original_path.exists():
+            logger.warning(f"  Original story not found, skipping")
+            continue
 
-        # Read files
+        # Read and embed original
         original_text = read_file(original_path)
-        abduction_text = read_file(abduction_path)
+        logger.info("  Generating original embedding...")
+        original_emb = get_embeddings(original_text, client)
+
+        if original_emb is None:
+            logger.warning(f"  Failed to generate embedding, skipping")
+            continue
+
+        # Initialize embeddings storage for this story
+        all_embeddings[story_name] = {
+            'original': original_emb.tolist()
+        }
+
+        # Initialize result row
+        result_row = {'story_name': story_name}
+
+        # Process baseline
+        baseline_path = baseline_base / story_name / 'transformed_story.txt'
         baseline_text = read_file(baseline_path)
 
-        # Generate embeddings
-        print("  - Generating embeddings...")
-        original_emb = get_embeddings(original_text, client)
-        abduction_emb = get_embeddings(abduction_text, client)
-        baseline_emb = get_embeddings(baseline_text, client)
+        if baseline_text:
+            logger.info("  Generating baseline embedding...")
+            baseline_emb = get_embeddings(baseline_text, client)
 
-        # Compute cosine similarities
-        sim_baseline = compute_cosine_sim(original_emb, baseline_emb)
-        sim_abduction = compute_cosine_sim(original_emb, abduction_emb)
+            if baseline_emb is not None:
+                all_embeddings[story_name]['baseline'] = baseline_emb.tolist()
+                sim_baseline = compute_cosine_sim(original_emb, baseline_emb)
+                result_row['baseline_similarity'] = sim_baseline
+                logger.info(f"    Baseline similarity: {sim_baseline:.4f}")
+            else:
+                result_row['baseline_similarity'] = None
+        else:
+            result_row['baseline_similarity'] = None
+            logger.warning("  Baseline story not found")
 
-        # Store results
-        results.append({
-            'story_name': story_name,
-            'cosine_sim_original_baseline': sim_baseline,
-            'cosine_similarity_original_abduction': sim_abduction
-        })
+        # Process all available abductive iterations
+        iteration_dirs = sorted([
+            d for d in story_dir.iterdir()
+            if d.is_dir() and d.name.startswith('iteration_')
+        ])
 
-        print(f"  - Baseline similarity: {sim_baseline}")
-        print(f"  - Abduction similarity: {sim_abduction}\n")
+        logger.info(f"  Found {len(iteration_dirs)} iterations")
 
-    # Create DataFrame and save to CSV
+        for iter_dir in iteration_dirs:
+            iter_num = int(iter_dir.name.split('_')[1])
+            transformed_path = iter_dir / 'story_transformed.txt'
+
+            if transformed_path.exists():
+                abduction_text = read_file(transformed_path)
+
+                if abduction_text:
+                    logger.info(f"  Generating abductive iter_{iter_num} embedding...")
+                    abduction_emb = get_embeddings(abduction_text, client)
+
+                    if abduction_emb is not None:
+                        all_embeddings[story_name][f'abductive_iter_{iter_num}'] = abduction_emb.tolist()
+                        sim_abduction = compute_cosine_sim(original_emb, abduction_emb)
+                        result_row[f'abductive_iter_{iter_num}_similarity'] = sim_abduction
+                        logger.info(f"    Similarity: {sim_abduction:.4f}")
+                    else:
+                        result_row[f'abductive_iter_{iter_num}_similarity'] = None
+                else:
+                    result_row[f'abductive_iter_{iter_num}_similarity'] = None
+            else:
+                logger.warning(f"  Iteration {iter_num} transformed story not found")
+
+        results.append(result_row)
+        logger.info("")
+
+    # Create output directory
+    output_path = Path(output_dir) / sanitized_model / problem_type
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Save embeddings to JSON
+    embeddings_file = output_path / 'embeddings.json'
+    logger.info(f"Saving embeddings to: {embeddings_file}")
+    with open(embeddings_file, 'w') as f:
+        json.dump(all_embeddings, f, indent=2)
+    logger.info(f"✓ Embeddings saved ({len(all_embeddings)} stories)")
+
+    # Save similarities to CSV
     df = pd.DataFrame(results)
-    df.to_csv(output_csv, index=False)
-    print(f"\n✓ Results saved to {output_csv}")
-    print(f"✓ Processed {len(results)} stories")
+    csv_file = output_path / 'cosine_similarities.csv'
+    df.to_csv(csv_file, index=False)
+    logger.info(f"✓ Cosine similarities saved to: {csv_file}")
+
+    # Summary
+    logger.info("\n" + "=" * 60)
+    logger.info("COMPUTATION COMPLETE")
+    logger.info("=" * 60)
+    logger.info(f"Stories processed: {len(results)}")
+    logger.info(f"Output directory: {output_path}")
+    logger.info("=" * 60)
 
     # Print summary statistics
-    print("\n=== Summary Statistics ===")
-    print(df[['cosine_sim_original_baseline', 'cosine_similarity_original_abduction']].describe())
+    logger.info("\nSummary Statistics:")
+    numeric_cols = [col for col in df.columns if col != 'story_name']
+    if numeric_cols:
+        logger.info("\n" + df[numeric_cols].describe().to_string())
 
+
+# ==========================================================
+# Main Entry Point
+# ==========================================================
 
 def main():
+    """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Compute cosine similarities between original, baseline, and abduction stories using OpenAI embeddings'
+        description='Compute cosine similarities using OpenAI embeddings',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Compute for gpt-4o forward problem
+  python plot_scripts/create_cosine_similarity_csv.py --model gpt-4o --problem forward
+
+  # Compute for Claude inverse problem
+  python plot_scripts/create_cosine_similarity_csv.py --model claude-sonnet-4-5 --problem inverse
+        """
     )
-    parser.add_argument('--phase', type=str, required=True,
-                        help='Phase name (e.g., phase2)')
-    parser.add_argument('--model', type=str, required=True,
-                        help='Model name (e.g., gpt-4o)')
-    parser.add_argument('--problem_type', type=str, required=True,
-                        help='Problem type (e.g., forward)')
-    parser.add_argument('--output', type=str, default='cosine_similarities.csv',
-                        help='Output CSV filename (default: cosine_similarities.csv)')
+
+    parser.add_argument(
+        '--model',
+        type=str,
+        required=True,
+        help='Model name (e.g., gpt-4o, claude-sonnet-4-5)'
+    )
+
+    parser.add_argument(
+        '--problem',
+        type=str,
+        choices=['forward', 'inverse'],
+        required=True,
+        help='Problem type: forward or inverse'
+    )
+
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='output_analysis/embeddings',
+        help='Output directory (default: output_analysis/embeddings)'
+    )
+
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Enable verbose logging'
+    )
 
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("Cosine Similarity Computation (OpenAI Embeddings)")
-    print("=" * 60)
-    print(f"Phase: {args.phase}")
-    print(f"Model: {args.model}")
-    print(f"Problem Type: {args.problem_type}")
-    print(f"Output: {args.output}")
-    print("=" * 60 + "\n")
+    # Setup logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
 
-    process_stories(args.phase, args.model, args.problem_type, args.output)
+    # Run processing
+    try:
+        process_stories(
+            model_name=args.model,
+            problem_type=args.problem,
+            output_dir=args.output_dir
+        )
+
+        logger.info("\n✓ Processing complete!")
+
+    except Exception as e:
+        logger.error(f"Processing failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        exit(1)
 
 
 if __name__ == '__main__':
