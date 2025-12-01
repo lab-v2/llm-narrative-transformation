@@ -37,6 +37,31 @@ logger = logging.getLogger(__name__)
 # ==========================================================
 # Utility Functions
 # ==========================================================
+def truncate_text_for_embedding(text: str, max_tokens: int = 8000) -> str:
+    """
+    Truncate text to fit within embedding model's token limit.
+
+    Args:
+        text: Input text
+        max_tokens: Maximum tokens (default 8000, safe for 8192 limit)
+
+    Returns:
+        Truncated text
+    """
+    if text is None:
+        return None
+
+    # Rough estimate: 1 token ≈ 4 characters
+    max_chars = max_tokens * 4
+
+    if len(text) <= max_chars:
+        return text
+
+    # Truncate and add marker
+    truncated = text[:max_chars]
+    logger.warning(f"Text truncated from {len(text)} to {len(truncated)} chars (~{max_tokens} tokens)")
+
+    return truncated
 
 def read_file(filepath):
     """Read text file and return content"""
@@ -55,6 +80,10 @@ def get_embeddings(text, client):
     """Generate embeddings for given text using OpenAI"""
     if text is None or text.strip() == "":
         return None
+
+    # Truncate if too long
+    text = truncate_text_for_embedding(text, max_tokens=8000)
+
     try:
         response = client.embeddings.create(
             model="text-embedding-3-large",
@@ -109,6 +138,22 @@ def process_stories(model_name, problem_type, output_dir='output_analysis/embedd
     # Sanitize model name
     sanitized_model = model_name.replace("/", "-").replace(":", "-")
 
+    # Create output directory and check for existing embeddings
+    output_path = Path(output_dir) / sanitized_model / problem_type
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    embeddings_file = output_path / 'embeddings.json'
+
+    # Load existing embeddings if available
+    if embeddings_file.exists():
+        logger.info(f"\nLoading existing embeddings from: {embeddings_file}")
+        with open(embeddings_file, 'r') as f:
+            all_embeddings = json.load(f)
+        logger.info(f"✓ Loaded cached embeddings for {len(all_embeddings)} stories")
+    else:
+        all_embeddings = {}
+        logger.info("\nNo cached embeddings found, will generate fresh")
+
     # Base paths
     abduction_base = Path(f'output/phase2/{sanitized_model}/{problem_type}')
     baseline_base = Path(f'output/baseline/{sanitized_model}/{problem_type}')
@@ -123,7 +168,7 @@ def process_stories(model_name, problem_type, output_dir='output_analysis/embedd
     logger.info(f"Found {len(story_dirs)} stories to process\n")
 
     results = []
-    all_embeddings = {}
+    # all_embeddings = {}
 
     for idx, story_dir in enumerate(sorted(story_dirs), 1):
         story_name = story_dir.name
@@ -135,10 +180,27 @@ def process_stories(model_name, problem_type, output_dir='output_analysis/embedd
             logger.warning(f"  Original story not found, skipping")
             continue
 
-        # Read and embed original
+        # # Read and embed original
+        # original_text = read_file(original_path)
+        # logger.info("  Generating original embedding...")
+        # original_emb = get_embeddings(original_text, client)
+
+        # Read original
         original_text = read_file(original_path)
-        logger.info("  Generating original embedding...")
-        original_emb = get_embeddings(original_text, client)
+
+        # Check if we have cached embedding for original
+        if story_name in all_embeddings and 'original' in all_embeddings[story_name]:
+            logger.info("  Using cached original embedding")
+            original_emb = np.array(all_embeddings[story_name]['original'])
+        else:
+            logger.info("  Generating original embedding...")
+            original_emb = get_embeddings(original_text, client)
+
+            if original_emb is not None:
+                # Initialize if needed
+                if story_name not in all_embeddings:
+                    all_embeddings[story_name] = {}
+                all_embeddings[story_name]['original'] = original_emb.tolist()
 
         if original_emb is None:
             logger.warning(f"  Failed to generate embedding, skipping")
@@ -156,12 +218,24 @@ def process_stories(model_name, problem_type, output_dir='output_analysis/embedd
         baseline_path = baseline_base / story_name / 'transformed_story.txt'
         baseline_text = read_file(baseline_path)
 
+        # if baseline_text:
+        #     logger.info("  Generating baseline embedding...")
+        #     baseline_emb = get_embeddings(baseline_text, client)
+
         if baseline_text:
-            logger.info("  Generating baseline embedding...")
-            baseline_emb = get_embeddings(baseline_text, client)
+            # Check cache
+            if story_name in all_embeddings and 'baseline' in all_embeddings[story_name]:
+                logger.info("  Using cached baseline embedding")
+                baseline_emb = np.array(all_embeddings[story_name]['baseline'])
+            else:
+                logger.info("  Generating baseline embedding...")
+                baseline_emb = get_embeddings(baseline_text, client)
+
+                if baseline_emb is not None:
+                    all_embeddings[story_name]['baseline'] = baseline_emb.tolist()
 
             if baseline_emb is not None:
-                all_embeddings[story_name]['baseline'] = baseline_emb.tolist()
+                # all_embeddings[story_name]['baseline'] = baseline_emb.tolist()
                 sim_baseline = compute_cosine_sim(original_emb, baseline_emb)
                 result_row['baseline_similarity'] = sim_baseline
                 logger.info(f"    Baseline similarity: {sim_baseline:.4f}")
@@ -186,12 +260,26 @@ def process_stories(model_name, problem_type, output_dir='output_analysis/embedd
             if transformed_path.exists():
                 abduction_text = read_file(transformed_path)
 
+                # if abduction_text:
+                #     logger.info(f"  Generating abductive iter_{iter_num} embedding...")
+                #     abduction_emb = get_embeddings(abduction_text, client)
+
                 if abduction_text:
-                    logger.info(f"  Generating abductive iter_{iter_num} embedding...")
-                    abduction_emb = get_embeddings(abduction_text, client)
+                    cache_key = f'abductive_iter_{iter_num}'
+
+                    # Check cache
+                    if story_name in all_embeddings and cache_key in all_embeddings[story_name]:
+                        logger.info(f"  Using cached abductive iter_{iter_num} embedding")
+                        abduction_emb = np.array(all_embeddings[story_name][cache_key])
+                    else:
+                        logger.info(f"  Generating abductive iter_{iter_num} embedding...")
+                        abduction_emb = get_embeddings(abduction_text, client)
+
+                        if abduction_emb is not None:
+                            all_embeddings[story_name][cache_key] = abduction_emb.tolist()
 
                     if abduction_emb is not None:
-                        all_embeddings[story_name][f'abductive_iter_{iter_num}'] = abduction_emb.tolist()
+                        # all_embeddings[story_name][f'abductive_iter_{iter_num}'] = abduction_emb.tolist()
                         sim_abduction = compute_cosine_sim(original_emb, abduction_emb)
                         result_row[f'abductive_iter_{iter_num}_similarity'] = sim_abduction
                         logger.info(f"    Similarity: {sim_abduction:.4f}")

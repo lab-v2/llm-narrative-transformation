@@ -25,7 +25,7 @@ OUTPUT_DIR="output"
 if [ "$PROBLEM" == "forward" ]; then
     STORIES_DIR="data/collectivistic-stories-all"
 else
-    STORIES_DIR="data/individualistic-rags-to-riches-stories-subset"
+    STORIES_DIR="data/individualistic-rags-to-riches-stories-subset-subset"
 fi
 
 # ==========================================================
@@ -88,7 +88,8 @@ for story_file in "$STORIES_DIR"/*.txt; do
         --top-k $TOP_K \
         --temperature $TEMPERATURE \
         --data-dir $DATA_DIR \
-        --output-dir $OUTPUT_DIR
+        --output-dir $OUTPUT_DIR \
+        --verbose
 
     # Check if successful
     if [ $? -eq 0 ]; then

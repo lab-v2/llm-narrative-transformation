@@ -1,282 +1,240 @@
 """
-Cosine Similarity Plotting Script
+Cosine Similarity Computation Script
 
-Creates publication-quality plots comparing cosine similarities
-between original and transformed stories.
+Computes cosine similarity between original and transformed stories
+using OpenAI embeddings. Measures how much stories changed.
 
-Higher similarity indicates better coherence with original narrative structure
-while still achieving the transformation goal.
+Processes all available iterations and saves embeddings for reuse.
 
-Output: PNG files in output_analysis/plots/{model}/{problem}/
+Output: CSV and embeddings saved to output_analysis/embeddings/{model}/{problem}/
 """
 
+import os
+import json
 import argparse
 import logging
 from pathlib import Path
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
+
+try:
+    from openai import OpenAI
+except ImportError:
+    raise ImportError("openai required. Install with: pip install openai")
+
+try:
+    from sklearn.metrics.pairwise import cosine_similarity
+except ImportError:
+    raise ImportError("scikit-learn required. Install with: pip install scikit-learn")
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# ==========================================================
-# Plot Configuration (Publication Quality)
-# ==========================================================
-
-# Font sizes for publication
-TITLE_FONT_SIZE = 16
-LABEL_FONT_SIZE = 14
-TICK_FONT_SIZE = 12
-LEGEND_FONT_SIZE = 12
-
-# Colors (green for baseline, shades of red for abductive)
-COLOR_BASELINE = '#2ECC71'  # Green
-COLOR_ABDUCTIVE_BASE = '#E74C3C'  # Red base
-
-# Hatch patterns for B&W printing
-HATCH_BASELINE = '///'  # Diagonal lines
-HATCH_ABDUCTIVE = ['...', 'xxx', '\\\\\\', '|||', '+++']  # Different patterns for iterations
-
-# Bar configuration
-BAR_ALPHA = 0.8
-EDGE_COLOR = 'black'
-EDGE_WIDTH = 1.2
-
 
 # ==========================================================
-# Data Loading
+# Utility Functions
 # ==========================================================
 
-def load_cosine_similarities(
-        model: str,
-        problem_type: str,
-        embeddings_dir: str = "output_analysis/embeddings"
-) -> pd.DataFrame:
-    """
-    Load cosine similarities CSV.
-
-    Args:
-        model: Model name
-        problem_type: "forward" or "inverse"
-        embeddings_dir: Base directory for embeddings
-
-    Returns:
-        DataFrame with cosine similarities
-    """
-    sanitized_model = model.replace("/", "-").replace(":", "-")
-
-    csv_file = Path(embeddings_dir) / sanitized_model / problem_type / "cosine_similarities.csv"
-
-    if not csv_file.exists():
-        raise FileNotFoundError(f"Cosine similarities CSV not found: {csv_file}")
-
-    logger.info(f"Loading: {csv_file}")
-    df = pd.read_csv(csv_file)
-    logger.info(f"✓ Loaded {len(df)} stories")
-
-    return df
+def read_file(filepath):
+    """Read text file and return content"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning(f"File not found: {filepath}")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading {filepath}: {e}")
+        return None
 
 
-# ==========================================================
-# Plot Creation
-# ==========================================================
-
-def create_cosine_similarity_plot(
-        df: pd.DataFrame,
-        model: str,
-        problem_type: str,
-        output_path: Path
-):
-    """
-    Create cosine similarity comparison plot.
-
-    Args:
-        df: DataFrame with cosine similarities
-        model: Model name (for title)
-        problem_type: "forward" or "inverse"
-        output_path: Path to save plot
-    """
-    # Extract story names (alphabetically ordered)
-    stories = sorted(df['story_name'].tolist())
-    n_stories = len(stories)
-
-    # Identify all similarity columns
-    all_cols = df.columns.tolist()
-    baseline_col = 'baseline_similarity'
-    abductive_cols = [col for col in all_cols if col.startswith('abductive_iter_') and col.endswith('_similarity')]
-    abductive_cols = sorted(abductive_cols, key=lambda x: int(x.split('_')[2]))  # Sort by iteration number
-
-    n_methods = 1 + len(abductive_cols)  # baseline + all abductive iterations
-
-    logger.info(f"Methods to plot: baseline + {len(abductive_cols)} abductive iterations")
-
-    # Calculate figure size based on number of stories
-    fig_width = max(16, n_stories * 0.6)
-    fig_height = 7
-
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-
-    # Calculate bar positions
-    bar_width = 0.8 / n_methods
-    x = np.arange(n_stories)
-
-    # Colors for abductive iterations (gradient from light to dark red)
-    def get_abductive_color(idx, total):
-        # Create gradient from light to dark red
-        if total == 1:
-            return COLOR_ABDUCTIVE_BASE
-        # Interpolate between light and dark
-        factor = idx / (total - 1)
-        base_rgb = np.array([231, 76, 60]) / 255  # #E74C3C
-        dark_rgb = np.array([192, 57, 43]) / 255  # #C0392B
-        color_rgb = base_rgb * (1 - factor) + dark_rgb * factor
-        return f'#{int(color_rgb[0] * 255):02x}{int(color_rgb[1] * 255):02x}{int(color_rgb[2] * 255):02x}'
-
-    # Collect all bars for legend
-    bars_list = []
-    labels_list = []
-
-    # Plot baseline
-    baseline_vals = []
-    for story in stories:
-        val = df[df['story_name'] == story][baseline_col].values[0]
-        baseline_vals.append(val)
-
-    bars_baseline = ax.bar(
-        x - (n_methods - 1) * bar_width / 2,
-        baseline_vals,
-        bar_width,
-        label='Baseline',
-        color=COLOR_BASELINE,
-        hatch=HATCH_BASELINE,
-        alpha=BAR_ALPHA,
-        edgecolor=EDGE_COLOR,
-        linewidth=EDGE_WIDTH
-    )
-    bars_list.append(bars_baseline)
-    labels_list.append('Baseline')
-
-    # Plot abductive iterations
-    for i, col in enumerate(abductive_cols):
-        iter_num = int(col.split('_')[2])
-
-        abductive_vals = []
-        for story in stories:
-            val = df[df['story_name'] == story][col].values[0]
-            abductive_vals.append(val)
-
-        position = x - (n_methods - 1) * bar_width / 2 + (i + 1) * bar_width
-
-        bars_abd = ax.bar(
-            position,
-            abductive_vals,
-            bar_width,
-            label=f'Abductive-Guided (Iter {iter_num})',
-            color=get_abductive_color(i, len(abductive_cols)),
-            hatch=HATCH_ABDUCTIVE[i % len(HATCH_ABDUCTIVE)],
-            alpha=BAR_ALPHA,
-            edgecolor=EDGE_COLOR,
-            linewidth=EDGE_WIDTH
+def get_embeddings(text, client):
+    """Generate embeddings for given text using OpenAI"""
+    if text is None or text.strip() == "":
+        return None
+    try:
+        response = client.embeddings.create(
+            model="text-embedding-3-large",
+            input=text
         )
-        bars_list.append(bars_abd)
-        labels_list.append(f'Abductive-Guided (Iter {iter_num})')
+        return np.array(response.data[0].embedding)
+    except Exception as e:
+        logger.error(f"Error generating embedding: {e}")
+        return None
 
-    # Customize plot
-    problem_desc = "Collectivistic → Individualistic" if problem_type == "forward" else "Individualistic → Collectivistic"
-    ax.set_title(
-        f'Cosine Similarity: {problem_desc}\n({model})',
-        fontsize=TITLE_FONT_SIZE,
-        fontweight='bold',
-        pad=20
-    )
 
-    ax.set_xlabel('Stories', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
-    ax.set_ylabel('Cosine Similarity (0.0 - 1.0)', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
-
-    # Set x-axis ticks
-    ax.set_xticks(x)
-    clean_names = [s.replace('_', ' ') for s in stories]
-    ax.set_xticklabels(clean_names, rotation=90, ha='right', fontsize=TICK_FONT_SIZE)
-
-    # Set y-axis
-    ax.set_ylim(0, 1.05)  # Similarity is 0-1
-    ax.set_yticks(np.arange(0, 1.1, 0.1))
-    ax.tick_params(axis='y', labelsize=TICK_FONT_SIZE)
-
-    # Add grid for easier reading
-    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5, zorder=0)
-    ax.set_axisbelow(True)
-
-    # Legend - positioned outside plot area on the right
-    ax.legend(
-        loc='upper left',
-        bbox_to_anchor=(1.01, 1),
-        fontsize=LEGEND_FONT_SIZE,
-        framealpha=1.0,
-        edgecolor='black',
-        borderpad=1,
-        fancybox=False
-    )
-
-    # Adjust layout to make room for legend
-    plt.subplots_adjust(right=0.85)
-
-    # Save plot
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    logger.info(f"✓ Saved plot: {output_path}")
-
-    plt.close()
+def compute_cosine_sim(emb1, emb2):
+    """Compute cosine similarity between two embeddings"""
+    if emb1 is None or emb2 is None:
+        return None
+    emb1 = emb1.reshape(1, -1)
+    emb2 = emb2.reshape(1, -1)
+    return cosine_similarity(emb1, emb2)[0][0]
 
 
 # ==========================================================
-# Main Function
+# Main Processing
 # ==========================================================
 
-def create_cosine_plots(
-        model: str,
-        problem_type: str,
-        embeddings_dir: str = "output_analysis/embeddings",
-        output_dir: str = "output_analysis/plots"
-):
+def process_stories(model_name, problem_type, output_dir='output_analysis/embeddings'):
     """
-    Create cosine similarity plots.
+    Process all stories and compute cosine similarities for all iterations.
 
     Args:
-        model: Model name
-        problem_type: "forward" or "inverse"
-        embeddings_dir: Base directory for embeddings/CSV
-        output_dir: Output directory for plots
+        model_name: e.g., 'gpt-4o', 'claude-sonnet-4-5'
+        problem_type: 'forward' or 'inverse'
+        output_dir: Base output directory
     """
     logger.info("=" * 60)
-    logger.info("CREATING COSINE SIMILARITY PLOT")
+    logger.info("COSINE SIMILARITY COMPUTATION")
     logger.info("=" * 60)
-    logger.info(f"Model: {model}")
+    logger.info(f"Model: {model_name}")
     logger.info(f"Problem: {problem_type}")
 
-    # Load data
-    df = load_cosine_similarities(model, problem_type, embeddings_dir)
+    # Initialize OpenAI client
+    logger.info("\nInitializing OpenAI client...")
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    # Sanitize model name for output path
-    sanitized_model = model.replace("/", "-").replace(":", "-")
-    plot_dir = Path(output_dir) / sanitized_model / problem_type
+    # Determine original story directory based on problem type
+    if problem_type == "forward":
+        original_dir = Path('data/collectivistic-stories-all')
+    else:  # inverse
+        original_dir = Path('data/individualistic-rags-to-riches-stories')
 
-    # Create plot
-    output_file = plot_dir / "cosine_similarity.png"
+    logger.info(f"Original stories directory: {original_dir}")
 
-    create_cosine_similarity_plot(
-        df=df,
-        model=model,
-        problem_type=problem_type,
-        output_path=output_file
-    )
+    # Sanitize model name
+    sanitized_model = model_name.replace("/", "-").replace(":", "-")
+
+    # Base paths
+    abduction_base = Path(f'output/phase2/{sanitized_model}/{problem_type}')
+    baseline_base = Path(f'output/baseline/{sanitized_model}/{problem_type}')
+
+    # Get all story directories from abduction
+    story_dirs = [d for d in abduction_base.iterdir() if d.is_dir()]
+
+    if not story_dirs:
+        logger.error(f"No story directories found in {abduction_base}")
+        return
+
+    logger.info(f"Found {len(story_dirs)} stories to process\n")
+
+    results = []
+    all_embeddings = {}
+
+    for idx, story_dir in enumerate(sorted(story_dirs), 1):
+        story_name = story_dir.name
+        logger.info(f"[{idx}/{len(story_dirs)}] Processing: {story_name}")
+
+        # Find original story
+        original_path = original_dir / f"{story_name}.txt"
+        if not original_path.exists():
+            logger.warning(f"  Original story not found, skipping")
+            continue
+
+        # Read and embed original
+        original_text = read_file(original_path)
+        logger.info("  Generating original embedding...")
+        original_emb = get_embeddings(original_text, client)
+
+        if original_emb is None:
+            logger.warning(f"  Failed to generate embedding, skipping")
+            continue
+
+        # Initialize embeddings storage for this story
+        all_embeddings[story_name] = {
+            'original': original_emb.tolist()
+        }
+
+        # Initialize result row
+        result_row = {'story_name': story_name}
+
+        # Process baseline
+        baseline_path = baseline_base / story_name / 'transformed_story.txt'
+        baseline_text = read_file(baseline_path)
+
+        if baseline_text:
+            logger.info("  Generating baseline embedding...")
+            baseline_emb = get_embeddings(baseline_text, client)
+
+            if baseline_emb is not None:
+                all_embeddings[story_name]['baseline'] = baseline_emb.tolist()
+                sim_baseline = compute_cosine_sim(original_emb, baseline_emb)
+                result_row['baseline_similarity'] = sim_baseline
+                logger.info(f"    Baseline similarity: {sim_baseline:.4f}")
+            else:
+                result_row['baseline_similarity'] = None
+        else:
+            result_row['baseline_similarity'] = None
+            logger.warning("  Baseline story not found")
+
+        # Process all available abductive iterations
+        iteration_dirs = sorted([
+            d for d in story_dir.iterdir()
+            if d.is_dir() and d.name.startswith('iteration_')
+        ])
+
+        logger.info(f"  Found {len(iteration_dirs)} iterations")
+
+        for iter_dir in iteration_dirs:
+            iter_num = int(iter_dir.name.split('_')[1])
+            transformed_path = iter_dir / 'story_transformed.txt'
+
+            if transformed_path.exists():
+                abduction_text = read_file(transformed_path)
+
+                if abduction_text:
+                    logger.info(f"  Generating abductive iter_{iter_num} embedding...")
+                    abduction_emb = get_embeddings(abduction_text, client)
+
+                    if abduction_emb is not None:
+                        all_embeddings[story_name][f'abductive_iter_{iter_num}'] = abduction_emb.tolist()
+                        sim_abduction = compute_cosine_sim(original_emb, abduction_emb)
+                        result_row[f'abductive_iter_{iter_num}_similarity'] = sim_abduction
+                        logger.info(f"    Similarity: {sim_abduction:.4f}")
+                    else:
+                        result_row[f'abductive_iter_{iter_num}_similarity'] = None
+                else:
+                    result_row[f'abductive_iter_{iter_num}_similarity'] = None
+            else:
+                logger.warning(f"  Iteration {iter_num} transformed story not found")
+
+        results.append(result_row)
+        logger.info("")
+
+    # Create output directory
+    output_path = Path(output_dir) / sanitized_model / problem_type
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Save embeddings to JSON
+    embeddings_file = output_path / 'embeddings.json'
+    logger.info(f"Saving embeddings to: {embeddings_file}")
+    with open(embeddings_file, 'w') as f:
+        json.dump(all_embeddings, f, indent=2)
+    logger.info(f"✓ Embeddings saved ({len(all_embeddings)} stories)")
+
+    # Save similarities to CSV
+    df = pd.DataFrame(results)
+    csv_file = output_path / 'cosine_similarities.csv'
+    df.to_csv(csv_file, index=False)
+    logger.info(f"✓ Cosine similarities saved to: {csv_file}")
 
     # Summary
     logger.info("\n" + "=" * 60)
-    logger.info("PLOT CREATED")
+    logger.info("COMPUTATION COMPLETE")
     logger.info("=" * 60)
-    logger.info(f"Plot saved to: {output_file}")
+    logger.info(f"Stories processed: {len(results)}")
+    logger.info(f"Output directory: {output_path}")
     logger.info("=" * 60)
+
+    # Print summary statistics
+    logger.info("\nSummary Statistics:")
+    numeric_cols = [col for col in df.columns if col != 'story_name']
+    if numeric_cols:
+        logger.info("\n" + df[numeric_cols].describe().to_string())
 
 
 # ==========================================================
@@ -286,15 +244,15 @@ def create_cosine_plots(
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Create cosine similarity plots',
+        description='Compute cosine similarities using OpenAI embeddings',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Create plot for gpt-4o forward
-  python plot_scripts/create_cosine_similarity_plot.py --model gpt-4o --problem forward
+  # Compute for gpt-4o forward problem
+  python plot_scripts/create_cosine_similarity_csv.py --model gpt-4o --problem forward
 
-  # Create for Claude inverse
-  python plot_scripts/create_cosine_similarity_plot.py --model claude-sonnet-4-5 --problem inverse
+  # Compute for Claude inverse problem
+  python plot_scripts/create_cosine_similarity_csv.py --model claude-sonnet-4-5 --problem inverse
         """
     )
 
@@ -314,17 +272,10 @@ Examples:
     )
 
     parser.add_argument(
-        '--embeddings-dir',
-        type=str,
-        default='output_analysis/embeddings',
-        help='Embeddings directory (default: output_analysis/embeddings)'
-    )
-
-    parser.add_argument(
         '--output-dir',
         type=str,
-        default='output_analysis/plots',
-        help='Output directory for plots (default: output_analysis/plots)'
+        default='output_analysis/embeddings',
+        help='Output directory (default: output_analysis/embeddings)'
     )
 
     parser.add_argument(
@@ -342,23 +293,22 @@ Examples:
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
-    # Create plot
+    # Run processing
     try:
-        create_cosine_plots(
-            model=args.model,
+        process_stories(
+            model_name=args.model,
             problem_type=args.problem,
-            embeddings_dir=args.embeddings_dir,
             output_dir=args.output_dir
         )
 
-        logger.info("\n✓ Plotting complete!")
+        logger.info("\n✓ Processing complete!")
 
     except Exception as e:
-        logger.error(f"Plotting failed: {e}")
+        logger.error(f"Processing failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
         exit(1)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
