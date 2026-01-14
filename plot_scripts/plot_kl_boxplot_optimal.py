@@ -134,7 +134,7 @@ def create_optimal_kl_boxplot(
 
     # Prepare data for box plot
     data_to_plot = [baseline_vals, optimal_vals]
-    labels = ['Baseline', 'Abductive-Guided\n(Optimal)']
+    labels = ['Baseline', 'Abductive-Guided']
     colors = [COLOR_BASELINE, COLOR_ABDUCTIVE]
 
     logger.info(f"Baseline: {len(baseline_vals)} values")
@@ -157,23 +157,36 @@ def create_optimal_kl_boxplot(
     )
 
     # Color the boxes
-    for patch, color in zip(bp['boxes'], colors):
+    # Now outliers match their box color
+    for i, (patch, color) in enumerate(zip(bp['boxes'], colors)):
         patch.set_facecolor(color)
+        # Color outliers to match their box color
+        bp['fliers'][i].set_markerfacecolor(color)
+        bp['fliers'][i].set_markeredgecolor(color)
 
     # Customize
     problem_desc = "Collectivistic → Individualistic" if problem_type == "forward" else "Individualistic → Collectivistic"
-    ax.set_title(
-        f'KL Divergence Distribution: {problem_desc}\n({model})',
-        fontsize=TITLE_FONT_SIZE,
-        fontweight='bold',
-        pad=20
-    )
+    # ax.set_title(
+    #     f'KL Divergence Distribution: {problem_desc}\n({model})',
+    #     fontsize=TITLE_FONT_SIZE,
+    #     fontweight='bold',
+    #     pad=20
+    # )
 
     ax.set_xlabel('Method', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
-    ax.set_ylabel('KL(transformed || original)\n(lower = better)', fontsize=LABEL_FONT_SIZE, fontweight='bold',
+    ax.set_ylabel('KL(transformed || original)', fontsize=LABEL_FONT_SIZE, fontweight='bold',
                   labelpad=10)
 
     ax.tick_params(axis='both', labelsize=TICK_FONT_SIZE)
+
+    # For Llama model, ensure first y-axis tick is 0.0
+    if 'llama' in model.lower():
+        y_min, y_max = ax.get_ylim()
+        ax.set_ylim(0, y_max)
+        tick_interval = 0.5
+        y_ticks = np.arange(0.25, y_max + tick_interval, tick_interval)
+        ax.set_yticks(y_ticks)
+
 
     # Grid
     ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5, zorder=0)
