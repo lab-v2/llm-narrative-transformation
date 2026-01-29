@@ -16,9 +16,15 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 # Change to the project directory
 cd /home/dbavikad/leibniz/llm-narrative-transformation
 
+set -euo pipefail
+
 source /home/dbavikad/miniconda3/etc/profile.d/conda.sh
 conda activate connect
-python test_gpu.py
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+
+echo "CONDA_PREFIX=$CONDA_PREFIX"
+export HF_TOKEN=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
+python fine_tune.py --data-csv data/fine_tuning_data/llm3_training_dataset_bedrock-us.meta.llama4-maverick-17b-instruct-v1-0.csv --output-dir output/local_llama4_maverick_lora
 
 echo
 echo "Job completed at: $(date)"

@@ -56,6 +56,7 @@ MODEL_PRICING = {
     # AWS Bedrock - Meta Llama
     "bedrock/us.meta.llama4-maverick-17b-instruct-v1:0": {"input": 0.00024, "output": 0.00097},
     "meta.llama4": {"input": 0.00024, "output": 0.00097},  # Fallback
+    # bedrock/us.meta.llama3-2-11b-instruct-v1:0
 
     # # Anthropic
     # "claude-3-opus": {"input": 0.015, "output": 0.075},
@@ -75,6 +76,9 @@ MODEL_PRICING = {
     # "bedrock": {"input": 0.003, "output": 0.015},
 }
 
+# Cache for local HF models to avoid re-loading every call
+_LOCAL_MODEL_CACHE: Dict[str, Dict[str, object]] = {}
+
 
 def get_pricing_for_model(model: str) -> Dict[str, float]:
     """
@@ -89,6 +93,9 @@ def get_pricing_for_model(model: str) -> Dict[str, float]:
     # Try exact match first
     if model in MODEL_PRICING:
         return MODEL_PRICING[model]
+
+    if model.startswith("local:"):
+        return {"input": 0.0, "output": 0.0}
 
     # Try prefix matching
     for key in MODEL_PRICING:
@@ -224,6 +231,10 @@ def get_api_key_for_model(model: str) -> Optional[str]:
         # Use AWS credentials (no explicit API key)
         return None
 
+    # Local open-weights models (no API key)
+    if model.startswith("local:"):
+        return None
+
     # Default to OpenAI
     key = os.getenv("OPENAI_API_KEY")
     if not key:
@@ -263,6 +274,10 @@ def call_llm_with_retry(
     Raises:
         Exception: If all retries fail
     """
+    # Local model path (e.g., "local:/path/to/model")
+    if model.startswith("local:"):
+        return _call_local_llm(system_prompt, user_prompt, model, temperature, max_tokens)
+
     api_key = get_api_key_for_model(model)
 
     # OpenRouter specific headers
@@ -334,6 +349,88 @@ def call_llm_with_retry(
             raise
 
     raise RuntimeError("Should not reach here")
+
+
+def _get_local_model_and_tokenizer(model_spec: str):
+    if model_spec in _LOCAL_MODEL_CACHE:
+        cached = _LOCAL_MODEL_CACHE[model_spec]
+        return cached["tokenizer"], cached["model"]
+
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as exc:
+        raise ImportError(
+            "Local model support requires torch and transformers. Install with: pip install torch transformers"
+        ) from exc
+
+    model_path = model_spec.split("local:", 1)[1]
+    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=dtype, device_map="auto")
+    except Exception:
+        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=dtype)
+        if torch.cuda.is_available():
+            model = model.to("cuda")
+
+    model.eval()
+    _LOCAL_MODEL_CACHE[model_spec] = {"tokenizer": tokenizer, "model": model}
+    return tokenizer, model
+
+
+def _call_local_llm(
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+) -> Tuple[str, int, int]:
+    try:
+        import torch
+    except ImportError as exc:
+        raise ImportError(
+            "Local model support requires torch. Install with: pip install torch"
+        ) from exc
+
+    tokenizer, model_obj = _get_local_model_and_tokenizer(model)
+
+    if hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    else:
+        parts = []
+        if system_prompt:
+            parts.append(f"System: {system_prompt}")
+        parts.append(f"User: {user_prompt}")
+        parts.append("Assistant:")
+        prompt_text = "\n\n".join(parts)
+
+    inputs = tokenizer(prompt_text, return_tensors="pt")
+    if torch.cuda.is_available():
+        inputs = {k: v.to("cuda") for k, v in inputs.items()}
+
+    do_sample = temperature is not None and temperature > 0
+    gen_kwargs = {
+        "max_new_tokens": max_tokens,
+        "do_sample": do_sample,
+        "temperature": max(temperature, 1e-5) if do_sample else None,
+        "pad_token_id": tokenizer.eos_token_id,
+    }
+
+    with torch.no_grad():
+        outputs = model_obj.generate(**inputs, **{k: v for k, v in gen_kwargs.items() if v is not None})
+
+    input_tokens = int(inputs["input_ids"].shape[-1])
+    output_tokens = int(outputs.shape[-1] - input_tokens)
+    text = tokenizer.decode(outputs[0][input_tokens:], skip_special_tokens=True).strip()
+    return text, input_tokens, max(output_tokens, 0)
 
 
 # ==========================================================

@@ -47,7 +47,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Local fine-tuning for open-weights models.")
     parser.add_argument(
         "--base-model",
-        default="meta-llama/Llama-4-Scout-17B-16E-Instruct",
+        default="meta-llama/Llama-4-Maverick-17B-128E-Instruct",
         help="Hugging Face model id or local path",
     )
     parser.add_argument("--data-csv", required=True, help="CSV with user_prompt, assistant_output columns")
@@ -95,6 +95,18 @@ def main() -> int:
         raise SystemExit(2) from exc
 
     set_seed(args.seed)
+
+    if not torch.cuda.is_available():
+        logger.error("CUDA GPU is required for fine-tuning but was not detected.")
+        return 2
+
+    device_index = torch.cuda.current_device()
+    device_name = torch.cuda.get_device_name(device_index)
+    capability = torch.cuda.get_device_capability(device_index)
+    total_mem_gb = torch.cuda.get_device_properties(device_index).total_memory / (1024 ** 3)
+    logger.info(
+        f"Using GPU: {device_name} | CC {capability[0]}.{capability[1]} | VRAM {total_mem_gb:.1f} GB"
+    )
 
     data_csv = Path(args.data_csv)
     if not data_csv.exists():
