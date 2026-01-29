@@ -189,12 +189,12 @@ def create_comparison_plot(
 
     # Customize
     problem_desc = "Collectivistic → Individualistic" if problem_type == "forward" else "Individualistic → Collectivistic"
-    ax.set_title(
-        f'{stat_type} Ratings Comparison: {problem_desc}\n({model})',
-        fontsize=TITLE_FONT_SIZE,
-        fontweight='bold',
-        pad=20
-    )
+    # ax.set_title(
+    #     f'{stat_type} Ratings Comparison: {problem_desc}\n({model})',
+    #     fontsize=TITLE_FONT_SIZE,
+    #     fontweight='bold',
+    #     pad=20
+    # )
 
     ax.set_xlabel('Stories', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
     ax.set_ylabel(f'{stat_type} Rating (1-5 scale)', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
@@ -214,9 +214,24 @@ def create_comparison_plot(
     ax.set_axisbelow(True)
 
     # Legend
+    # ax.legend(
+    #     loc='upper left',
+    #     bbox_to_anchor=(1.01, 1),
+    #     fontsize=LEGEND_FONT_SIZE,
+    #     framealpha=1.0,
+    #     edgecolor='black',
+    #     borderpad=1,
+    #     fancybox=False
+    # )
+
+
+    # plt.subplots_adjust(right=0.85)
+
+    # Legend
     ax.legend(
-        loc='upper left',
-        bbox_to_anchor=(1.01, 1),
+        loc='upper center',
+        ncol=3,
+        bbox_to_anchor=(0.5, 1.05),
         fontsize=LEGEND_FONT_SIZE,
         framealpha=1.0,
         edgecolor='black',
@@ -224,7 +239,7 @@ def create_comparison_plot(
         fancybox=False
     )
 
-    plt.subplots_adjust(right=0.85)
+    plt.subplots_adjust(right=0.95)
 
     # Save
     output_path.parent.mkdir(parents=True, exist_ok=True)

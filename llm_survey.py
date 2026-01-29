@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 MODEL_PRICING = {
     # OpenAI
     "gpt-4o": {"input": 0.0025, "output": 0.01},
+    "gpt-5.2": {"input": 0.00175, "output": 0.014},
     "xai/grok-4-fast-reasoning": {"input": 0.0002, "output": 0.0005},
     # Anthropic Claude
     "claude-sonnet-4-5": {"input": 0.003, "output": 0.015},  # $3/$15 per 1M = $0.003/$0.015 per 1K
@@ -56,6 +57,10 @@ MODEL_PRICING = {
     # AWS Bedrock - Meta Llama
     "bedrock/us.meta.llama4-maverick-17b-instruct-v1:0": {"input": 0.00024, "output": 0.00097},
     "meta.llama4": {"input": 0.00024, "output": 0.00097},  # Fallback
+    "bedrock/us.meta.llama3-2-1b-instruct-v1:0": {"input": 0.00024, "output": 0.00097},  # Fallback
+    # AWS Bedrock - DeepSeek
+    "bedrock/us.deepseek.r1-v1:0": {"input": 0.00135, "output": 0.0054},
+    "bedrock/deepseek-llm-r1-distill-qwen-32b": {"input": 0.00135, "output": 0.0054}
 
     # # Anthropic
     # "claude-3-opus": {"input": 0.015, "output": 0.075},
@@ -210,14 +215,14 @@ def get_api_key_for_model(model: str) -> Optional[str]:
             )
         return key
 
-    if model.startswith("gemini/"):
-        key = os.getenv("GEMINI_API_KEY")
-        if not key:
-            raise RuntimeError(
-                "GEMINI_API_KEY environment variable not set. "
-                "Set it with: export GEMINI_API_KEY='your-key'"
-            )
-        return key
+    # if model.startswith("gemini/"):
+    #     key = os.getenv("GEMINI_API_KEY")
+    #     if not key:
+    #         raise RuntimeError(
+    #             "GEMINI_API_KEY environment variable not set. "
+    #             "Set it with: export GEMINI_API_KEY='your-key'"
+    #         )
+    #     return key
 
     # AWS Bedrock models (qwen, bedrock/)
     if model.startswith("bedrock/") or model.startswith("qwen"):
@@ -243,7 +248,7 @@ def call_llm_with_retry(
         user_prompt: str,
         model: str,
         temperature: float = 0.0,
-        max_tokens: int = 1024,
+        max_tokens: int = 4096,
         max_retries: int = 3
 ) -> Tuple[str, int, int]:
     """
@@ -276,15 +281,27 @@ def call_llm_with_retry(
     for attempt in range(max_retries):
         try:
             # Build kwargs
-            kwargs = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
+            # GPT-5.x models use max_completion_tokens instead of max_tokens
+            if model.startswith("gpt-5"):
+                kwargs = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "max_completion_tokens": max_tokens,  # New parameter for GPT-5.x
+                    "temperature": temperature
+                }
+            else:
+                kwargs = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "max_tokens": max_tokens,  # Old parameter for other models
+                    "temperature": temperature
+                }
 
             # Add API key if not Bedrock
             if api_key is not None:
@@ -464,9 +481,13 @@ def conduct_survey_single_story(
             "Finally, quote a few short excerpts from the story that exemplify your chosen rating."
         )
         # Add explicit format instruction for non-GPT models
-        if not model.startswith("gpt-"):
-            user_prompt += " Format excerpts as a numbered list: 1. \"excerpt\", 2. \"excerpt\", etc."
-
+        if not model.startswith("gpt-4"):
+            user_prompt += (
+                " Format excerpts as a simple numbered list with plain quotes:\n"
+                "1. \"excerpt text\"\n"
+                "2. \"excerpt text\"\n"
+                "Do NOT use bold (**), italics (*), or explanatory notes in parentheses."
+            )
         try:
             # Call LLM with retry logic
             response_text, input_tokens, output_tokens = call_llm_with_retry(
@@ -474,7 +495,7 @@ def conduct_survey_single_story(
                 user_prompt=user_prompt,
                 model=model,
                 temperature=temperature,
-                max_tokens=1024,
+                max_tokens=4096,
                 max_retries=3
             )
 

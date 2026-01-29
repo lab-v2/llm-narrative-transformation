@@ -312,6 +312,8 @@ def create_ranked_prescriptions(
                 logger.debug(f"Skipping duplicate segment: {segment_text[:50]}...")
                 continue
 
+            # #Skip while generating ranked prescriptsions
+            # if gap['']
             # Add prescription
             prescriptions.append({
                 'rank': rank,

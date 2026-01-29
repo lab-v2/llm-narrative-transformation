@@ -134,14 +134,14 @@ def create_optimal_kl_boxplot(
 
     # Prepare data for box plot
     data_to_plot = [baseline_vals, optimal_vals]
-    labels = ['Baseline', 'Abductive-Guided']
+    labels = ['Baseline', 'Abduction-Guided']
     colors = [COLOR_BASELINE, COLOR_ABDUCTIVE]
 
     logger.info(f"Baseline: {len(baseline_vals)} values")
     logger.info(f"Optimal: {len(optimal_vals)} values")
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=(4, 5))
 
     # Create box plot
     bp = ax.boxplot(
@@ -173,11 +173,13 @@ def create_optimal_kl_boxplot(
     #     pad=20
     # )
 
-    ax.set_xlabel('Method', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
+    # ax.set_xlabel('Method', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
     ax.set_ylabel('KL(transformed || original)', fontsize=LABEL_FONT_SIZE, fontweight='bold',
                   labelpad=10)
 
     ax.tick_params(axis='both', labelsize=TICK_FONT_SIZE)
+    for label in ax.get_xticklabels():
+        label.set_fontweight('bold')
 
     # For Llama model, ensure first y-axis tick is 0.0
     if 'llama' in model.lower():
