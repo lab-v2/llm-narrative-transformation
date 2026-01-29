@@ -1,0 +1,17 @@
+# GPU test submit file - final version
+executable = /home/dbavikad/leibniz/llm-narrative-transformation/gpu_test.sh
+
+# Output files
+output = output/gpu_test_final_$(Cluster)_$(Process).out
+error  = output/gpu_test_final_$(Cluster)_$(Process).err
+log    = output/gpu_test_final_$(Cluster)_$(Process).log
+
+
+
+Requirements = (CUDADriverVersion >= 12.0) 
+
+# Resource requests - using proper GPU syntax
++request_gpus = 1
+
+# Queue the job
+queue 1
