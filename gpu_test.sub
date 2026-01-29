@@ -1,20 +1,17 @@
 # GPU test submit file - final version
-executable = gpu_test.sh
+executable = /home/dbavikad/leibniz/llm-narrative-transformation/gpu_test.sh
 
 # Output files
 output = output/gpu_test_final_$(Cluster)_$(Process).out
 error  = output/gpu_test_final_$(Cluster)_$(Process).err
 log    = output/gpu_test_final_$(Cluster)_$(Process).log
 
-should_transfer_files = YES
-when_to_transfer_output = ON_EXIT
-transfer_input_files = test_gpu.py
-transfer_executable = True
 
-Requirements = (CUDADriverVersion >= 12.0) && (TARGET.Machine != "CRUSH-NODE-10-5-5-5")
+
+Requirements = (CUDADriverVersion >= 12.0) 
 
 # Resource requests - using proper GPU syntax
-request_gpus = 1
++request_gpus = 1
 
 # Queue the job
 queue 1
