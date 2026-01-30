@@ -57,10 +57,11 @@ MODEL_PRICING = {
     # AWS Bedrock - Meta Llama
     "bedrock/us.meta.llama4-maverick-17b-instruct-v1:0": {"input": 0.00024, "output": 0.00097},
     "meta.llama4": {"input": 0.00024, "output": 0.00097},  # Fallback
-    "bedrock/us.meta.llama3-2-1b-instruct-v1:0": {"input": 0.00024, "output": 0.00097},  # Fallback
+    "bedrock/us.meta.llama3-2-11b-instruct-v1:0": {"input": 0.00016, "output": 0.00072},  # Fallback
     # AWS Bedrock - DeepSeek
     "bedrock/us.deepseek.r1-v1:0": {"input": 0.00135, "output": 0.0054},
     "bedrock/deepseek-llm-r1-distill-qwen-32b": {"input": 0.00135, "output": 0.0054}
+
 
     # # Anthropic
     # "claude-3-opus": {"input": 0.015, "output": 0.075},

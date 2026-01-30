@@ -24,11 +24,11 @@ INDIVIDUALIST = "individualist"
 
 PROMPT_TEMPLATE = '''You are given a {source_type} story below. 
 
-** start of story **
+
 
 {story}
 
-** end of story **
+
 
 Your goal is to make the story more {target_type}. To make more {target_type}, you will update only the selected segment from the story which is provided below. 
 
