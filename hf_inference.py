@@ -225,11 +225,12 @@ def call_hf_with_retry(
                 outputs = model_obj.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
-                    temperature=temperature,
+                    temperature=max(temperature, 0.001) if temperature > 0 else 0,
                     top_p=top_p,
-                    do_sample=temperature > 0,
+                    do_sample=False,  # Disable sampling on CPU to avoid autocast issues
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id,
+                    use_cache=True,
                 )
             
             # Decode
