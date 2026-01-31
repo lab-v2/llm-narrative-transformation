@@ -24,6 +24,6 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 echo "CONDA_PREFIX=$CONDA_PREFIX"
 export HF_TOKEN="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"
-python fine_tune.py --data-csv data/fine_tuning_data/llm4_recipe_dataset.jsonl --output-dir output/local_llama4_maverick_lora_llm4
+python fine_tune.py --data-csv data/fine_tuning_data/llm3_training_dataset_bedrock-us.meta.llama4-maverick-17b-instruct-v1-0.jsonl --output-dir output/local_llama4_maverick_lora_llm3
 echo
 echo "Job completed at: $(date)"

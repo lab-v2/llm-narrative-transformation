@@ -1,15 +1,11 @@
 # GPU test submit file - final version
-executable = /home/dbavikad/leibniz/llm-narrative-transformation/gpu_test.sh
+executable = /home/dbavikad/leibniz/llm-narrative-transformation/gpu_testllm2.sh
 
 # Output files
 output = output/gpu_test_final_$(Cluster)_$(Process).out
 error  = output/gpu_test_final_$(Cluster)_$(Process).err
 log    = output/gpu_test_final_$(Cluster)_$(Process).log
 
-should_transfer_files = YES
-when_to_transfer_output = ON_EXIT_OR_EVICT
-stream_output = True
-stream_error = True
 
 
 Requirements = (CUDADriverVersion >= 12.0) && (CUDAGlobalMemoryMb >= 80000)

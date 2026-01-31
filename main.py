@@ -18,7 +18,7 @@ import os
 
 # Load environment variables from .env file
 load_dotenv('.env')
-print(f"DEBUG: API key loaded: {os.getenv('OPENAI_API_KEY')[:10]}...")  # Print first 10 chars
+# print(f"DEBUG: API key loaded: {os.getenv('OPENAI_API_KEY')[:10]}...")  # Print first 10 chars
 
 
 from story_loader import load_training_stories, load_single_story

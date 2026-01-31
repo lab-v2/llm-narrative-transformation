@@ -9,11 +9,15 @@ Example:
 """
 
 import argparse
+import json
 import logging
 import os
 from pathlib import Path
 from typing import Dict, Any
-
+import torch
+from peft import LoraConfig, get_peft_model
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, Trainer, TrainingArguments, set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ def main() -> int:
     parser.add_argument(
         "--base-model",
         default="meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+        #"/home/dbavikad/leibniz/llm-narrative-transformation/my_models/Llama-4-Maverick-17B-128E-Instruct",
         help="Hugging Face model id or local path",
     )
     parser.add_argument("--data-csv", required=True, help="CSV with user_prompt, assistant_output columns")
@@ -75,24 +80,16 @@ def main() -> int:
     parser.add_argument("--save-steps", type=int, default=500, help="Save checkpoint every N steps")
     parser.add_argument("--logging-steps", type=int, default=50, help="Log every N steps")
     parser.add_argument("--no-chat-template", action="store_true", help="Disable tokenizer chat template")
+    parser.add_argument(
+        "--loss-log-file",
+        default="training_loss.jsonl",
+        help="Filename (within output-dir) to record training loss logs as JSONL",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    try:
-        import torch
-        from datasets import load_dataset
-        from transformers import (
-            AutoModelForCausalLM,
-            AutoTokenizer,
-            DataCollatorForLanguageModeling,
-            Trainer,
-            TrainingArguments,
-            set_seed,
-        )
-    except ImportError as exc:
-        logger.error("Missing dependencies. Install: pip install torch transformers datasets peft")
-        raise SystemExit(2) from exc
+    
 
     set_seed(args.seed)
 
@@ -117,23 +114,33 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading tokenizer and model...")
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, use_fast=True)
+    # Llama 4 tokenizer config advertises a base class; prefer fast tokenizer to avoid get_vocab() NotImplementedError.
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model, use_fast=True)
+    except Exception as exc:
+        logger.warning("Fast tokenizer load failed (%s). Falling back to slow tokenizer.", exc)
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model, use_fast=False)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        args.base_model,
-        torch_dtype=torch.bfloat16 if args.bf16 else (torch.float16 if args.fp16 else None),
-        device_map="auto",
-    )
+    torch_dtype = torch.bfloat16 if args.bf16 else (torch.float16 if args.fp16 else None)
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.base_model,
+            torch_dtype=torch_dtype,
+            device_map="auto",
+        )
+    except ValueError as exc:
+        if "accelerate" not in str(exc).lower():
+            raise
+        logger.warning("Accelerate not available; loading model without device_map and moving to CUDA.")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.base_model,
+            torch_dtype=torch_dtype,
+        )
+        model = model.to("cuda")
 
     if args.use_lora:
-        try:
-            from peft import LoraConfig, get_peft_model
-        except ImportError as exc:
-            logger.error("peft is required for LoRA. Install: pip install peft")
-            raise SystemExit(2) from exc
-
         lora_config = LoraConfig(
             r=args.lora_r,
             lora_alpha=args.lora_alpha,
@@ -195,6 +202,16 @@ def main() -> int:
 
     logger.info("Starting training...")
     trainer.train()
+
+    loss_log_path = output_dir / args.loss_log_file
+    loss_entries = [entry for entry in trainer.state.log_history if "loss" in entry]
+    if loss_entries:
+        with loss_log_path.open("w", encoding="utf-8") as handle:
+            for entry in loss_entries:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+        logger.info("Wrote training loss log to %s (%d entries).", loss_log_path, len(loss_entries))
+    else:
+        logger.warning("No loss entries found in trainer log history; loss log not written.")
 
     logger.info("Saving model...")
     trainer.save_model(str(output_dir))
