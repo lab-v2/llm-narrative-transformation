@@ -24,11 +24,11 @@ INDIVIDUALIST = "individualist"
 
 PROMPT_TEMPLATE = '''You are given a {source_type} story below. 
 
-** start of story **
+
 
 {story}
 
-** end of story **
+
 
 Your goal is to make the story more {target_type}. To make more {target_type}, you will update only the selected segment from the story which is provided below. 
 
@@ -63,7 +63,8 @@ def group_prescriptions_by_feature(prescriptions: List[Dict]) -> Dict[str, List[
 
 def select_top_k_features(
         prescriptions: List[Dict],
-        top_k: int
+        top_k: int,
+        problem_type: str
 ) -> Tuple[List[str], List[Dict]]:
     """
     Select top-k features and their prescriptions.
@@ -82,7 +83,16 @@ def select_top_k_features(
     seen_features = []
     for presc in prescriptions:
         if presc['feature'] not in seen_features:
-            seen_features.append(presc['feature'])
+
+            if problem_type == "forward":
+                # In forward problem, only consider features where target < current
+                if presc['target_rating'] < presc['current_rating']:
+                    seen_features.append(presc['feature'])
+            elif problem_type == "inverse":
+                # In inverse problem, only consider features where target > current
+                if presc['target_rating'] > presc['current_rating']:
+                    seen_features.append(presc['feature'])
+            # seen_features.append(presc['feature'])
 
     # Take top-k features
     selected_features = seen_features[:top_k]
@@ -189,7 +199,7 @@ def transform_story_iteratively(
 
     # Select top-k features and their segments
     selected_features, selected_prescriptions = select_top_k_features(
-        prescriptions, top_k
+        prescriptions, top_k, problem_type
     )
 
     # Initialize cost tracker for transformations
