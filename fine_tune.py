@@ -20,6 +20,20 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, Trainer, TrainingArguments, set_seed
 
 logger = logging.getLogger(__name__)
+import sys, accelerate, transformers, torch
+# import os
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+
+import torch, gc
+gc.collect()
+torch.cuda.empty_cache()
+
+print("PYTHON:", sys.executable)
+print("ACCELERATE:", accelerate.__version__, accelerate.__file__)
+print("TRANSFORMERS:", transformers.__version__)
+print("TORCH:", torch.__version__)
+print("CUDA:", torch.cuda.is_available())
 
 
 def _build_text_formatter(tokenizer, system_prompt: str, use_chat_template: bool):
@@ -55,16 +69,20 @@ def main() -> int:
         #"/home/dbavikad/leibniz/llm-narrative-transformation/my_models/Llama-4-Maverick-17B-128E-Instruct",
         help="Hugging Face model id or local path",
     )
-    parser.add_argument("--data-csv", required=True, help="CSV with user_prompt, assistant_output columns")
+    parser.add_argument(
+        "--data-csv",
+        required=True,
+        help="CSV or JSONL with user_prompt/assistant_output columns (or JSONL with messages)",
+    )
     parser.add_argument("--output-dir", required=True, help="Output directory for fine-tuned model")
     parser.add_argument("--prompt-col", default="user_prompt", help="Prompt column name")
     parser.add_argument("--completion-col", default="assistant_output", help="Completion column name")
     parser.add_argument("--system-prompt", default="", help="Optional system prompt")
     parser.add_argument("--max-length", type=int, default=4096, help="Max sequence length")
-    parser.add_argument("--epochs", type=int, default=3, help="Training epochs")
+    parser.add_argument("--epochs", type=int, default=5, help="Training epochs")
     parser.add_argument("--batch-size", type=int, default=1, help="Per-device batch size")
     parser.add_argument("--grad-accum", type=int, default=8, help="Gradient accumulation steps")
-    parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--use-lora", action="store_true", help="Enable LoRA fine-tuning")
     parser.add_argument("--lora-r", type=int, default=16, help="LoRA rank")
@@ -97,17 +115,24 @@ def main() -> int:
         logger.error("CUDA GPU is required for fine-tuning but was not detected.")
         return 2
 
-    device_index = torch.cuda.current_device()
-    device_name = torch.cuda.get_device_name(device_index)
-    capability = torch.cuda.get_device_capability(device_index)
-    total_mem_gb = torch.cuda.get_device_properties(device_index).total_memory / (1024 ** 3)
-    logger.info(
-        f"Using GPU: {device_name} | CC {capability[0]}.{capability[1]} | VRAM {total_mem_gb:.1f} GB"
-    )
+    gpu_count = torch.cuda.device_count()
+    if gpu_count < 1:
+        logger.error("No CUDA GPUs detected.")
+        return 2
+    visible_gpus = min(gpu_count, 2)
+    if gpu_count < 2:
+        logger.warning("Only %d GPU detected; running on a single GPU.", gpu_count)
+    for idx in range(visible_gpus):
+        device_name = torch.cuda.get_device_name(idx)
+        capability = torch.cuda.get_device_capability(idx)
+        total_mem_gb = torch.cuda.get_device_properties(idx).total_memory / (1024 ** 3)
+        logger.info(
+            f"Using GPU {idx}: {device_name} | CC {capability[0]}.{capability[1]} | VRAM {total_mem_gb:.1f} GB"
+        )
 
     data_csv = Path(args.data_csv)
     if not data_csv.exists():
-        logger.error(f"CSV not found: {data_csv}")
+        logger.error(f"Data file not found: {data_csv}")
         return 1
 
     output_dir = Path(args.output_dir)
@@ -124,21 +149,25 @@ def main() -> int:
         tokenizer.pad_token = tokenizer.eos_token
 
     torch_dtype = torch.bfloat16 if args.bf16 else (torch.float16 if args.fp16 else None)
-    try:
-        model = AutoModelForCausalLM.from_pretrained(
-            args.base_model,
-            torch_dtype=torch_dtype,
+    # try:
+    max_memory = {}
+    for idx in range(visible_gpus):
+        total_mem_gb = torch.cuda.get_device_properties(idx).total_memory / (1024 ** 3)
+        max_memory[idx] = f"{int(total_mem_gb * 0.9)}GiB"
+    load_kwargs = {"torch_dtype": torch_dtype}
+    if visible_gpus > 1:
+        load_kwargs.update(
             device_map="auto",
+            max_memory=max_memory
         )
-    except ValueError as exc:
-        if "accelerate" not in str(exc).lower():
-            raise
-        logger.warning("Accelerate not available; loading model without device_map and moving to CUDA.")
-        model = AutoModelForCausalLM.from_pretrained(
-            args.base_model,
-            torch_dtype=torch_dtype,
-        )
-        model = model.to("cuda")
+    model = AutoModelForCausalLM.from_pretrained(
+        args.base_model,
+        **load_kwargs
+    )
+    if visible_gpus == 1 and torch.cuda.is_available():
+        model.to("cuda")
+    model.gradient_checkpointing_enable()
+    model.config.use_cache = False
 
     if args.use_lora:
         lora_config = LoraConfig(
@@ -147,15 +176,40 @@ def main() -> int:
             lora_dropout=args.lora_dropout,
             bias="none",
             task_type="CAUSAL_LM",
+            target_modules=[
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+    ]
         )
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
 
     logger.info("Loading dataset...")
-    dataset = load_dataset("csv", data_files=str(data_csv))
+    data_suffix = data_csv.suffix.lower()
+    dataset_format = "json" if data_suffix in {".json", ".jsonl"} else "csv"
+    dataset = load_dataset(dataset_format, data_files=str(data_csv))
 
-    # Normalize column names if custom names are provided
-    if args.prompt_col != "user_prompt" or args.completion_col != "assistant_output":
+    # Normalize input to user_prompt/assistant_output columns.
+    train_columns = set(dataset["train"].column_names)
+    if "messages" in train_columns and ("user_prompt" not in train_columns or "assistant_output" not in train_columns):
+        def _messages_to_columns(example: Dict[str, Any]) -> Dict[str, Any]:
+            prompt = ""
+            completion = ""
+            for msg in example.get("messages", []):
+                role = msg.get("role")
+                if role == "user" and not prompt:
+                    prompt = msg.get("content", "")
+                elif role == "assistant" and not completion:
+                    completion = msg.get("content", "")
+            return {"user_prompt": prompt, "assistant_output": completion}
+
+        dataset = dataset.map(_messages_to_columns, remove_columns=dataset["train"].column_names)
+    elif args.prompt_col != "user_prompt" or args.completion_col != "assistant_output":
         def _rename_columns(example: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "user_prompt": example.get(args.prompt_col, ""),
@@ -171,12 +225,16 @@ def main() -> int:
             batch["text"],
             truncation=True,
             max_length=args.max_length,
-            padding="max_length",
+            padding=False,
         )
 
     tokenized = dataset.map(_tokenize, batched=True, remove_columns=["text"])
 
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,
+        pad_to_multiple_of=8,
+    )
 
     training_args = TrainingArguments(
         output_dir=str(output_dir),
@@ -191,6 +249,7 @@ def main() -> int:
         bf16=args.bf16,
         report_to=[],
         remove_unused_columns=False,
+        gradient_checkpointing=True
     )
 
     trainer = Trainer(

@@ -23,7 +23,7 @@ conda activate connect
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 echo "CONDA_PREFIX=$CONDA_PREFIX"
-export HF_TOKEN="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"
-python fine_tune.py --data-csv data/fine_tuning_data/llm4_recipe_dataset.jsonl --output-dir output/local_llama4_maverick_lora_llm4
+python fine_tune.py --use-lora --data-csv data/fine_tuning_data/llm4_recipe_dataset_sub.jsonl --output-dir output/local_llama4_maverick_lora_llm4
+# python train_llm2.py
 echo
 echo "Job completed at: $(date)"

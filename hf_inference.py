@@ -122,7 +122,7 @@ def load_hf_model(model_id: str, device: Optional[str] = None):
 
         model_kwargs = {
             "trust_remote_code": True,
-            "torch_dtype": torch.float16 if device == "cuda" else torch.float32,
+            "dtype": torch.float16 if device == "cuda" else torch.float32,
         }
 
         # Add device_map for efficient multi-GPU loading on CUDA

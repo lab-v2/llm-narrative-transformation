@@ -82,9 +82,11 @@ def load_and_format_dataset(jsonl_path="data/collectivistic_dataset_llm2.jsonl")
 
 def train_mistral_collectivistic():
     # Configuration
-    MODEL_NAME = "mistralai/Mistral-7B-v0.3"
-    OUTPUT_DIR = "./mistral-collectivistic-finetuned"
-    DATASET_PATH = "data/collectivistic_dataset_llm2.jsonl"
+    # MODEL_NAME = "mistralai/Mistral-7B-v0.3"
+    # OUTPUT_DIR = "./mistral-collectivistic-finetuned"
+    MODEL_NAME = "meta-llama/Llama-4-Maverick-17B-128E-Instruct"
+    OUTPUT_DIR = "./llam4-finetuned-llm2"
+    DATASET_PATH = "data/fine_tuning_data/collectivistic_dataset_llm2.jsonl"
 
     print("🚀 Starting Mistral-7B-v0.3 fine-tuning (FORCED CPU mode)...")
     print(f"💻 System: {platform.system()} {platform.machine()}")
@@ -112,11 +114,12 @@ def train_mistral_collectivistic():
         trust_remote_code=True,
         token=hf_token,
         low_cpu_mem_usage=True,
+        device_map="balanced"
     )
 
     # Explicitly move to CPU
-    model = model.to('cpu')
-    print("✅ Model confirmed on CPU")
+    # model = model.to('cpu')
+    # print("✅ Model confirmed on CPU")
 
     # Minimal LoRA configuration
     print("🔧 Setting up minimal LoRA configuration...")
@@ -193,7 +196,7 @@ def train_mistral_collectivistic():
 
 
 if __name__ == "__main__":
-    if not os.path.exists("data/collectivistic_dataset_llm2.jsonl"):
+    if not os.path.exists("data/fine_tuning_data/collectivistic_dataset_llm2.jsonl"):
         print("❌ Dataset not found!")
         exit(1)
 
