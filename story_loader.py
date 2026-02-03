@@ -37,12 +37,12 @@ def load_training_stories(data_dir: str, problem_type: str) -> List[Dict[str, st
     """
     # Determine which directory to load from
     if problem_type == "forward":
-        story_subdir = "individualistic-rags-to-riches-stories"
-        # story_subdir = "individualistic-rags-to-riches-stories-subset-subset"
+        # story_subdir = "individualistic-rags-to-riches-stories"
+        story_subdir = "individualistic-rags-to-riches-stories-subset-subset"
         logger.info("Loading individualistic stories for forward problem")
     else:  # inverse
-        # story_subdir = "collectivistic-stories-subset"
-        story_subdir = "collectivistic-stories-all"
+        story_subdir = "collectivistic-stories-subset"
+        # story_subdir = "collectivistic-stories-all"
         logger.info("Loading collectivistic stories for inverse problem")
 
     # Construct full path to story directory

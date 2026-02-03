@@ -36,7 +36,8 @@ def get_model_display_name(model_short: str) -> str:
         'llama4': 'Llama 4',
         'llama3': 'Llama 3',
         'deepseek_r1': 'DeepSeek R1',
-        'deepseek': 'DeepSeek'
+        'deepseek': 'DeepSeek',
+        'gpt52': 'GPT-5.2'
     }
     return mapping.get(model_short, model_short)
 
