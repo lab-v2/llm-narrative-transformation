@@ -23,7 +23,6 @@ conda activate connect
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 echo "CONDA_PREFIX=$CONDA_PREFIX"
-
-python fine_tune.py --use-lora --data-csv data/fine_tuning_data/llm3_training_dataset_bedrock-us.meta.llama4-maverick-17b-instruct-v1-0.jsonl --output-dir output/local_llama4_maverick_lora_llm3
+python fine_tune.py --use-lora --data-csv data/fine_tuning_data/llm3_training_dataset_bedrock-us.meta.llama4-maverick-17b-instruct-v1-0.jsonl --output-dir output/local_llama3_lora_llm3 --base-model meta-llama/Llama-3.1-8B-Instruct
 echo
 echo "Job completed at: $(date)"

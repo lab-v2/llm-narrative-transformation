@@ -6,8 +6,7 @@ output = output/gpu_test_final_$(Cluster)_$(Process).out
 error  = output/gpu_test_final_$(Cluster)_$(Process).err
 log    = output/gpu_test_final_$(Cluster)_$(Process).log
 
-
-
+# #
 Requirements = (CUDADriverVersion >= 12.0) && (CUDAGlobalMemoryMb >= 80000)
 
 # Resource requests - using proper GPU syntax

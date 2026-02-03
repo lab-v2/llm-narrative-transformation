@@ -2,4 +2,4 @@ __pycache__/
 output/*
 data/*
 my_models/*
-mistral-collectivistic-finetuned
+mistral-collectivistic-finetuned/*

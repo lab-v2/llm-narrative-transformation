@@ -21,6 +21,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLan
 
 logger = logging.getLogger(__name__)
 import sys, accelerate, transformers, torch
+from transformers import BitsAndBytesConfig
+from peft import prepare_model_for_kbit_training
+
 # import os
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -78,7 +81,7 @@ def main() -> int:
     parser.add_argument("--prompt-col", default="user_prompt", help="Prompt column name")
     parser.add_argument("--completion-col", default="assistant_output", help="Completion column name")
     parser.add_argument("--system-prompt", default="", help="Optional system prompt")
-    parser.add_argument("--max-length", type=int, default=4096, help="Max sequence length")
+    parser.add_argument("--max-length", type=int, default=1024, help="Max sequence length")
     parser.add_argument("--epochs", type=int, default=5, help="Training epochs")
     parser.add_argument("--batch-size", type=int, default=1, help="Per-device batch size")
     parser.add_argument("--grad-accum", type=int, default=8, help="Gradient accumulation steps")
@@ -148,26 +151,33 @@ def main() -> int:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    torch_dtype = torch.bfloat16 if args.bf16 else (torch.float16 if args.fp16 else None)
-    # try:
-    max_memory = {}
-    for idx in range(visible_gpus):
-        total_mem_gb = torch.cuda.get_device_properties(idx).total_memory / (1024 ** 3)
-        max_memory[idx] = f"{int(total_mem_gb * 0.9)}GiB"
-    load_kwargs = {"torch_dtype": torch_dtype}
-    if visible_gpus > 1:
-        load_kwargs.update(
-            device_map="auto",
-            max_memory=max_memory
-        )
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16 ,
+        bnb_4bit_use_double_quant=True,
+    )
+
+    max_memory = {i: f"{int(torch.cuda.get_device_properties(i).total_memory/(1024**3) * 0.9)}GiB"
+                for i in range(visible_gpus)}
+
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
-        **load_kwargs
+        quantization_config=bnb_config,
+        dtype=torch.float16 ,
+        device_map={"": 0},#"balanced",          # use even on 1 GPU
+        attn_implementation="sdpa",  
+        max_memory=max_memory,      # safe on 1 or 2 GPUs
+        trust_remote_code=True,     # if the repo needs it
     )
-    if visible_gpus == 1 and torch.cuda.is_available():
-        model.to("cuda")
+    print("Model memory footprint:",
+      model.get_memory_footprint()/1e9, "GB")
+
+    model = prepare_model_for_kbit_training(model)
     model.gradient_checkpointing_enable()
     model.config.use_cache = False
+    model.enable_input_require_grads()
+
 
     if args.use_lora:
         lora_config = LoraConfig(
@@ -249,7 +259,9 @@ def main() -> int:
         bf16=args.bf16,
         report_to=[],
         remove_unused_columns=False,
-        gradient_checkpointing=True
+        gradient_checkpointing=True,
+        optim="paged_adamw_8bit",
+        # place_model_on_device=False,
     )
 
     trainer = Trainer(
