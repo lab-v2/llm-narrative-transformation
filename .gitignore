@@ -3,3 +3,4 @@ output/*
 data/*
 my_models/*
 mistral-collectivistic-finetuned/*
+output_analysis/*
