@@ -134,7 +134,7 @@ def compute_entity_transitions(mentions_per_sent, entities):
 
 
 def transition_vector(transitions):
-    role_pairs = [f"{a}->{b}" for a in ROLES for b in ROLES]
+    role_pairs = [f"{a}->{b}" for a in ROLES for b in ROLES if not (a == "-" and b == "-")]
     vector = np.zeros(len(role_pairs), dtype=float)
     index = {pair: i for i, pair in enumerate(role_pairs)}
 

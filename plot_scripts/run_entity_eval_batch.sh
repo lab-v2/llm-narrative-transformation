@@ -12,11 +12,11 @@ if [ -f "/home/dbavikad/miniconda3/etc/profile.d/conda.sh" ]; then
   conda activate connect
 fi
 
-# MODELS=(bedrock-us.deepseek.r1-v1-0 bedrock-us.meta.llama4-maverick-17b-instruct-v1-0 claude-sonnet-4-5 gpt-4o gpt-5.2 xai-grok-4-fast-reasoning)
-
+# 
 unset MODELS
 unset GROUPS
-MODELS=(claude-sonnet-4-5)
+MODELS=(bedrock-us.deepseek.r1-v1-0 bedrock-us.meta.llama4-maverick-17b-instruct-v1-0 claude-sonnet-4-5 gpt-4o gpt-5.2 xai-grok-4-fast-reasoning)
+
 GROUPS=(collectivistic individualistic)
 
 TMP_DIR="/tmp/entity_eval_$$"
@@ -54,12 +54,9 @@ for model in "${MODELS[@]}"; do
         echo "processing $model $group $story" >> "$ERRORS"
       fi
 
-      if [ -f "$out_trans_abd/transition_similarity.txt" ] && [ -f "$out_trans_base/transition_similarity.txt" ]; then
-        if [ "$DEBUG" = "1" ]; then
-          echo "skip_existing $model $group $story" >> "$ERRORS"
-        fi
-      else
-        echo "processing $model $group $story"
+      # Always recompute to reflect updated transition logic
+      rm -f "$out_trans_abd/transition_similarity.txt" "$out_trans_base/transition_similarity.txt"
+      echo "processing $model $group $story"
 
         python /home/dbavikad/leibniz/llm-narrative-transformation/plot_scripts/create_entity_grid.py \
           --original "$original" \
@@ -100,7 +97,6 @@ for model in "${MODELS[@]}"; do
             echo "transition_baseline_failed $model $group $story" >> "$ERRORS"
             continue
           }
-      fi
 
       abd_sim=$(awk -F= '/cosine_similarity/ {print $2}' "$out_trans_abd/transition_similarity.txt")
       base_sim=$(awk -F= '/cosine_similarity/ {print $2}' "$out_trans_base/transition_similarity.txt")
