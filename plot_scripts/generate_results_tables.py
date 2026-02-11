@@ -200,8 +200,8 @@ def generate_results_table(
         logger.info(f"    Abduction: {abduction_avg:.2f}%")
 
         # Add two rows (one for baseline, one for abduction)
-        model_display = get_model_display_name(model_short)
-
+        # model_display = get_model_display_name(model_short)
+        model_display = model_short
         rows.append({
             'Approach': 'One-Shot',
             'LLM Backbone': model_display,

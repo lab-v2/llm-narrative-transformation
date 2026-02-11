@@ -16,7 +16,7 @@ from huggingface_hub import login
 # Force CPU usage
 torch.backends.mps.is_available = lambda: False
 torch.backends.mps.is_built = lambda: False
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['CUDA_VISIBLE_VICES'] = ''
 
 
 def authenticate_huggingface():

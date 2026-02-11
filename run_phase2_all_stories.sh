@@ -12,7 +12,7 @@
 # Phase 2 parameters
 PHASE=2
 PROBLEM="inverse"
-MODEL="bedrock/us.meta.llama3-1-8b-instruct-v1:0"
+MODEL="ft:gpt-4o-2024-08-06:syracuse-university:llm2:D89EgdqA"
 MAX_ITERATIONS=3
 TOP_K=20
 TEMPERATURE=0.7

@@ -50,6 +50,8 @@ MODEL_PRICING = {
     # OpenAI
     "gpt-4o": {"input": 0.0025, "output": 0.01},
     "gpt-5.2": {"input": 0.00175, "output": 0.014},
+    "gpt-4o-mini-2024-07-18": {"input": 0.0008, "output": 0.0032},
+    "ft:gpt-4o-mini-2024-07-18:syracuse-university:llm2:D5JJuHZi": {"input": 0.0008, "output": 0.0032},
     "xai/grok-4-fast-reasoning": {"input": 0.0002, "output": 0.0005},
     # Anthropic Claude
     "claude-sonnet-4-5": {"input": 0.003, "output": 0.015},  # $3/$15 per 1M = $0.003/$0.015 per 1K
@@ -482,13 +484,13 @@ def conduct_survey_single_story(
             "Finally, quote a few short excerpts from the story that exemplify your chosen rating."
         )
         # Add explicit format instruction for non-GPT models
-        if not model.startswith("gpt-4"):
-            user_prompt += (
-                " Format excerpts as a simple numbered list with plain quotes:\n"
-                "1. \"excerpt text\"\n"
-                "2. \"excerpt text\"\n"
-                "Do NOT use bold (**), italics (*), or explanatory notes in parentheses."
-            )
+        # if not model.startswith("gpt-4"):
+        user_prompt += (
+            " Format excerpts as a simple numbered list with plain quotes:\n"
+            "1. \"excerpt text\"\n"
+            "2. \"excerpt text\"\n"
+            "Do NOT use bold (**), italics (*), or explanatory notes in parentheses."
+        )
         try:
             # Call LLM with retry logic
             response_text, input_tokens, output_tokens = call_llm_with_retry(
