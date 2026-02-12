@@ -34,7 +34,7 @@ Your goal is to make the story more {target_type}. To make more {target_type}, y
 
 Selected segment: ** {segment} **
 
-Now, rewrite the whole story by updating only the selected segment to make the story more {target_type}. Don't change other part of the story, and just output the rewritten story, nothing else.
+Now, rewrite the whole story by updating only the selected segment to make the story more {target_type}. Don't change other part of the story, and just output the rewritten story, nothing else. If and only if you do not find the selected segment in the story, just return the original story without any modification.
 '''
 
 
@@ -277,7 +277,7 @@ def transform_story_iteratively(
                 user_prompt=prompt,
                 model=model,
                 temperature=temperature,
-                max_tokens=4096,
+                max_tokens=8096,
                 max_retries=3
             )
 
