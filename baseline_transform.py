@@ -142,7 +142,7 @@ def run_baseline_transformation(
             user_prompt=prompt,
             model=model,
             temperature=temperature,
-            max_tokens=4096,
+            max_tokens=8096,
             max_retries=3
         )
 

@@ -113,7 +113,7 @@ def create_bertscore_f1_boxplot(
     logger.info(f"Abduction-Guided: {len(abduction_vals)} values")
 
     # Create figure (taller for better box visibility)
-    fig, ax = plt.subplots(figsize=(8, 9))
+    fig, ax = plt.subplots(figsize=(4, 5))
 
     # Create box plot
     bp = ax.boxplot(
@@ -136,10 +136,12 @@ def create_bertscore_f1_boxplot(
         bp['fliers'][i].set_markeredgecolor(color)
 
     # Customize
-    ax.set_xlabel('Method', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
+    # ax.set_xlabel('Method', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
     ax.set_ylabel('BERTScore F1', fontsize=LABEL_FONT_SIZE, fontweight='bold', labelpad=10)
 
     ax.tick_params(axis='both', labelsize=TICK_FONT_SIZE)
+    for label in ax.get_xticklabels():
+        label.set_fontweight('bold')
 
     # Set y-axis limits zoomed to BERTScore F1 range (typically 0.75-1.0)
     ax.set_ylim(0.75, 1.01)

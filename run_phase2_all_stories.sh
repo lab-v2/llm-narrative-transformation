@@ -12,7 +12,7 @@
 # Phase 2 parameters
 PHASE=2
 PROBLEM="inverse"
-MODEL="ft:gpt-4o-2024-08-06:syracuse-university:llm2:D89EgdqA"
+MODEL="gpt-4o"
 MAX_ITERATIONS=3
 TOP_K=20
 TEMPERATURE=0.7
@@ -79,7 +79,7 @@ for story_file in "$STORIES_DIR"/*.txt; do
     echo "[$CURRENT/$TOTAL_STORIES] Processing: $story_name"
     echo "========================================"
     # Run Phase 2 for this story
-    python main.py \
+    python main_single.py \
         --phase $PHASE \
         --problem $PROBLEM \
         --model $MODEL \
