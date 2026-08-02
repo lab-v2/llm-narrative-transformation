@@ -1,6 +1,36 @@
 __pycache__/
+.env
+.DS_Store
 output/*
+output_test/*
+output_hf/*
+output_analysis_runtime/*
+output_analysis_standalone/*
 data/*
 my_models/*
 mistral-collectivistic-finetuned/*
 output_analysis/*
+
+# IDE / OS
+.idea/
+
+# large data & results dirs — copy to other machines out-of-band, don't version
+original_output/
+evaluation_data/
+survey/
+plots/
+temp_dele/
+
+# scratch / experiment byproducts (not part of the pipeline)
+*.log
+/tp.py
+/582_u.pdf
+/isLocated.graphml
+/cosine_similarities.csv
+/gamma_results_wordcount.csv
+/js_divergence_old.csv
+/js_divergence_token.csv
+/kl_divergence_original_transformed_old.csv
+/kl_divergence_token_original_transformed.csv
+/kl_divergence_token_transformed_original.csv
+/kl_divergence_transformed_original_old.csv
