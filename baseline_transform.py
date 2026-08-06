@@ -72,7 +72,8 @@ def run_baseline_transformation(
         temperature: float,
         data_dir: str,
         phase2_dir: str,
-        output_dir: str
+        output_dir: str,
+        max_tokens: int = 8096
 ) -> str:
     """
     Run baseline transformation for a single story.
@@ -85,6 +86,7 @@ def run_baseline_transformation(
         data_dir: Data directory (for questions file)
         phase2_dir: Phase 2 output directory (to find original survey)
         output_dir: Baseline output directory
+        max_tokens: Max output tokens for the transformation call
 
     Returns:
         Path to story output directory
@@ -142,7 +144,7 @@ def run_baseline_transformation(
             user_prompt=prompt,
             model=model,
             temperature=temperature,
-            max_tokens=8096,
+            max_tokens=max_tokens,
             max_retries=3
         )
 
@@ -277,6 +279,13 @@ Examples:
     )
 
     parser.add_argument(
+        '--max-tokens',
+        type=int,
+        default=8096,
+        help='Max output tokens for the transformation call (default: 8096)'
+    )
+
+    parser.add_argument(
         '--data-dir',
         type=str,
         default='data',
@@ -305,13 +314,15 @@ Examples:
 
     args = parser.parse_args()
 
-    # Setup logging
+    # Setup logging — per-run log file so parallel runs (different models/problems)
+    # don't interleave into one shared log
     log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_file = f'baseline_transform_{sanitize_model_name(args.model)}_{args.problem}.log'
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler('baseline_transform.log'),
+            logging.FileHandler(log_file),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -330,7 +341,8 @@ Examples:
             temperature=args.temperature,
             data_dir=args.data_dir,
             phase2_dir=args.phase2_dir,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            max_tokens=args.max_tokens
         )
 
         logger.info(f"\n✓ Baseline transformation successful!")
