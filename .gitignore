@@ -20,6 +20,7 @@ evaluation_data/
 evaluation_data_*/
 survey/
 plots/
+figures-paper1/
 temp_dele/
 
 # scratch / experiment byproducts (not part of the pipeline)

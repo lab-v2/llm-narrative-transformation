@@ -27,8 +27,9 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-TECHS = [("zeroshot", "Zero-Shot"), ("cot", "CoT"),
-         ("fewshot", "Few-Shot"), ("iterative", "Self-Refine")]
+# Order: weakest -> strongest expected sophistication, Ours (Abduction) last.
+TECHS = [("zeroshot", "Zero-Shot"), ("fewshot", "Few-Shot"),
+         ("cot", "CoT"), ("iterative", "Self-Refine")]
 
 DEFAULT_MODELS = [
     "gpt-4o", "gpt-5.2", "xai/grok-4-fast-reasoning", "claude-sonnet-4-5",
