@@ -300,6 +300,31 @@ Notes:
   `transformed_survey.json` before extracting ratings.
 - All suffixed outputs (`output_analysis/*_<tech>`, `evaluation_data_<tech>`) are gitignored.
 
+### Combined comparison tables
+
+Once the per-baseline KL / BERTScore / improvement outputs exist (the three blocks above,
+run for all techniques), build the combined baseline-vs-abduction tables — rows = models,
+columns = `Zero-Shot / CoT / Few-Shot / Self-Refine / Abduction` — for all three metrics in
+one shot:
+
+```bash
+python plot_scripts/generate_baseline_comparison_tables.py
+#   → output_analysis/tables_baselines/improvement_{forward,inverse}.csv
+#   → output_analysis/tables_baselines/kl_median_{forward,inverse}.csv
+#   → output_analysis/tables_baselines/bertscore_f1_median_{forward,inverse}.csv
+```
+
+- **improvement** = avg gap-to-target closed on the median rating (%, higher = better shift);
+  **kl_median** = median KL (lower = better fidelity); **bertscore_f1_median** = median F1
+  (higher = better fidelity).
+- The **Abduction** column is identical across techniques (it's the method, independent of the
+  baseline).
+- Reads the suffixed dirs under `--analysis-dir` (default `output_analysis`); override
+  `--models` / `--metrics` / `--output-dir` as needed.
+- **Reading the results:** baselines tend to win the *improvement* (they shift aggressively),
+  but abduction wins *KL and BERTScore* almost everywhere — i.e. baselines trade fidelity for
+  shift, abduction keeps both.
+
 ---
 
 ## Evaluation plots
