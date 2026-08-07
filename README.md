@@ -41,12 +41,19 @@ Runs in two phases.
    the next iteration
    → writes `<output-dir>/phase2/<model>/<problem>/<story>/iteration_N/...`
 
-### Route 2 — Baseline (`baseline_transform.py`)
+### Route 2 — Baselines (four prompting techniques)
 
-The comparison baseline: **no PyReason, no abduction, no iteration.** A single prompt
-("Make the following story more {individualistic|collectivistic}"), then survey the result.
-It reuses the original survey from Phase 2's `iteration_0`, so **Phase 2 must have run first**
-for the same story/model/problem.
+The comparison baselines: **no PyReason, no abduction.** Four LLM-only prompting techniques,
+each a standalone script that transforms a story then surveys the result. All reuse the
+original survey from Phase 2's `iteration_0`, so **Phase 2 must have run first** for the same
+story/model/problem. See "Baseline prompting techniques" below for details:
+
+| Technique | Script | Output dir |
+|-----------|--------|------------|
+| Zero-Shot | `baseline_transform.py` | `output/baseline_zeroshot` (also the legacy `output/baseline`) |
+| Chain-of-Thought | `baseline_transform_cot.py` | `output/baseline_cot` |
+| Few-Shot | `baseline_transform_fewshot.py` | `output/baseline_fewshot` |
+| Self-Refine (iterative) | `baseline_transform_iterative.py` | `output/baseline_iterative` |
 
 ---
 
@@ -203,44 +210,95 @@ comparison → plots / tables). Nothing is hardcoded to the old story list.
 
 ---
 
-## Different prompting techniques (design note — not yet implemented)
+## Baseline prompting techniques
 
-> This section is a **build plan**, not a runbook. As of today the only non-neurosymbolic
-> route is the **hardcoded zero-shot baseline**; few-shot / CoT / self-refine / etc. do **not**
-> exist in the code yet. Read this before implementing so the outputs slot into the existing
-> evaluation pipeline for free.
+Four LLM-only baselines, each a standalone transform script (mirrors `baseline_transform.py`)
+plus 6 per-model batch runners. All share the same args
+(`--story --problem --model --temperature --max-tokens --data-dir --phase2-dir --output-dir`),
+write to a technique-specific `output/baseline_<tech>/<model>/<problem>/<story>/`, and survey
+only the final story. Prereq for all: the Phase-2 `iteration_0` survey must exist.
 
-**What exists today.** `baseline_transform.py` builds a single fixed prompt and has **no
-strategy flag**:
-```python
-# baseline_transform.py → create_baseline_prompt()
-prompt = f"Make the following story more {target}:\n\n{story_text}"
-# system_prompt = "You are a helpful assistant."
+| Technique | Transform script | How it prompts |
+|-----------|------------------|----------------|
+| **Zero-Shot** | `baseline_transform.py` | single prompt: `Make the following story more {target}` |
+| **Chain-of-Thought** | `baseline_transform_cot.py` | reason step-by-step, emit story in `<rewritten_story>` tags (parsed out) |
+| **Few-Shot** | `baseline_transform_fewshot.py` | prepend expert example pairs from `data/fewshot_examples/<problem>/`, then the zero-shot instruction |
+| **Self-Refine** | `baseline_transform_iterative.py` | 3 stateless calls: zero-shot → critique(original+transformed) → refine(transformed+critique, tag-parsed) |
+
+### Batch runners (one per model, problem type as arg)
+
+Each technique has 6 runners `baseline_all_stories_<tech>_<model>.sh` for
+`{gpt4o, gpt52, grok, claude, llama, deepseek}`. Problem type is the **first arg**
+(`forward` default, or `inverse`); each skips already-done stories **and** stories not in the
+test set (no Phase-2 survey). Run one per terminal:
+
+```bash
+# <tech> ∈ {cot, fewshot, iterative}; zero-shot uses baseline_all_stories*.sh
+bash baseline_all_stories_cot_grok.sh            # forward
+bash baseline_all_stories_iterative_claude.sh inverse
 ```
-Args are only `--story --problem --model --data-dir --output-dir --temperature`.
 
-**To add prompting techniques, two pieces are needed:**
+Notes:
+- **Few-shot examples** live in `data/fewshot_examples/<forward|inverse>/example*/{original,transformed}.txt`
+  (held out from the test set; gitignored under `data/`, so copy them out-of-band to other machines).
+- **CoT & Self-Refine** wrap the final story in `<rewritten_story>` tags and parse it out, so
+  `transformed_story.txt` is clean (no model-specific preamble/commentary); the raw response is
+  kept in `transformation_raw.txt` / `refine_raw.txt`.
+- **Self-Refine** is the priciest (~4 calls/story: zero-shot + critique + refine + survey).
 
-1. **Generation.** Add a `--strategy` (e.g. `zero_shot` | `few_shot` | `cot` | `self_refine`)
-   to `baseline_transform.py` (or a sibling `prompt_transform.py`) that swaps the
-   system/user prompt and any exemplars. Run it over the **full** test set (old + new) per
-   model × direction, the same way `baseline_all_stories.sh` loops.
+---
 
-2. **Output layout = the whole trick.** The eval scripts locate the baseline at
-   `output/baseline/<model>/<problem>/<story>/transformed_story.txt`. To reuse ratings /
-   divergence / BERTScore / tables **without editing them**, treat "technique" as a new path
-   dimension — mirror what the standalone pipeline did for the *survey model*:
-   `output/<strategy>/<model>/<problem>/<story>/transformed_story.txt`.
-   Then either (a) point each eval script's `--base-dir` / `--output-dir` at the strategy dir
-   where those flags already exist (`extract_ratings_baseline.py --base-dir`,
-   `create_divergence_csv.py`, etc.), or (b) thread a `--strategy` arg through
-   `extract_ratings` → `create_model_comparison_csv` → `generate_results_tables`, exactly like
-   `--model-name-for-survey` is threaded through the `plot_scripts_standalone/` copies. Option
-   (b) gives you clean per-technique tables with the existing gap-closed Improvement % formula.
+## Per-baseline evaluation (technique dimension)
 
-**Order of operations when you get to it:** finish "Adding test stories" above so the test set
-is final → run each strategy's generation over the full set → run the eval pipeline once per
-strategy → the results tables/plots gain a technique dimension.
+Every eval script takes a `--baseline-dir` (or `--base-dir`) so you can compute KL / BERTScore /
+Improvement % for **each** baseline against abduction, writing to technique-suffixed dirs so
+nothing collides. The abduction side is identical across techniques; only the baseline box/column
+changes. Example uses `<tech>` ∈ `{zeroshot, cot, fewshot, iterative}` and the matching
+`output/baseline_<tech>` source (zero-shot = `output/baseline_zeroshot`).
+
+**KL divergence** (per model × problem):
+```bash
+python plot_scripts/create_divergence_csv.py --model <M> --problem <P> \
+  --baseline-dir output/baseline_<tech> --output-dir output_analysis/divergences_<tech>
+python plot_scripts/plot_kl_boxplot_optimal_updated.py --model <M> --problem <P> \
+  --divergence-dir output_analysis/divergences_<tech> --output-dir output_analysis/plots_<tech> \
+  --baseline-label "CoT" --max-y-tick 5.0     # label per technique; 5.0 fits all 4 baselines
+```
+
+**BERTScore F1** (per model):
+```bash
+python extract_evaluation_stories.py --model_name <sanitized-model> \
+  --baseline-dir output/baseline_<tech> --output-dir evaluation_data_<tech> --force
+python plot_scripts/bertscore_analysis.py {collectivistic|individualistic} <sanitized-model> \
+  --data-root evaluation_data_<tech> \
+  --output-csv output_analysis/bert_scores_csv_<tech>/bertscore_results_<sanitized-model>_<forward|inverse>.csv
+python plot_scripts/bertscore_f1_boxplot.py --model <M> --problem <P> \
+  --bertscore-dir output_analysis/bert_scores_csv_<tech> --output-dir output_analysis/plots_<tech> \
+  --baseline-label "CoT"     # y-axis default 0.75–1.01 fits all baselines
+# run_bertscore_all_baselines.sh batches all 4 techniques × 6 models × 2 dirs (resumable)
+```
+
+**Improvement % table** (per model × problem):
+```bash
+python plot_scripts/extract_ratings_baseline.py --model <M> --problem <P> \
+  --base-dir output/baseline_<tech> --output-dir output_analysis/baseline_<tech>
+python plot_scripts/create_model_comparison_csv.py --models <all models> --problem <P> \
+  --baseline-dir output_analysis/baseline_<tech> --output-dir output_analysis/cross_model_summary_<tech>
+python plot_scripts/generate_results_tables.py --models <all models> \
+  --summary-dir output_analysis/cross_model_summary_<tech> --output-dir output_analysis/tables_<tech>
+```
+
+Notes:
+- **KL y-axis:** the paper zero-shot plots use `--max-y-tick 4.0`; the 4-baseline comparison uses
+  a uniform **5.0** (covers the shared abduction outlier at ~4.31 — the peak is an abduction value,
+  identical in every plot).
+- **BERTScore is slow** (loads RoBERTa; ~90s per model/direction, no API). Use
+  `run_bertscore_all_baselines.sh` and let it run.
+- **Gotcha:** the CoT batch runners predate the "not-in-test-set" skip check, so a CoT-inverse run
+  over the 90-story dir can leave partial dirs (only `original_story.txt`) that break
+  `extract_ratings_baseline`. Delete any `output/baseline_cot/*/*/*/` dir lacking
+  `transformed_survey.json` before extracting ratings.
+- All suffixed outputs (`output_analysis/*_<tech>`, `evaluation_data_<tech>`) are gitignored.
 
 ---
 
