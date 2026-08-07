@@ -6,7 +6,8 @@ from pathlib import Path
 import argparse
 
 
-def extract_evaluation_stories(model_name):
+def extract_evaluation_stories(model_name, baseline_dir="output/baseline",
+                               eval_root="evaluation_data", force=False):
     """
     Extract all original and transformed stories for evaluation
     - Individualistic: original individualistic + abduction/baseline transformed to collectivistic (inverse)
@@ -14,12 +15,18 @@ def extract_evaluation_stories(model_name):
 
     Args:
         model_name: The model name (e.g., "gpt-4o", "claude-sonnet-4-5")
+        baseline_dir: Baseline transforms dir (default output/baseline;
+                      e.g. output/baseline_cot for the CoT baseline)
+        eval_root: Root output folder (default evaluation_data;
+                   e.g. evaluation_data_cot to keep a technique separate)
+        force: If True, recreate an existing output dir without prompting
     """
 
     print(f"🚀 Extracting evaluation stories for model: {model_name}")
+    print(f"   Baseline dir: {baseline_dir}  ->  Output root: {eval_root}")
 
     # Paths
-    output_dir = f"evaluation_data/{model_name}"
+    output_dir = f"{eval_root}/{model_name}"
     individualistic_dir = f"{output_dir}/individualistic"
     collectivistic_dir = f"{output_dir}/collectivistic"
 
@@ -41,7 +48,8 @@ def extract_evaluation_stories(model_name):
     # Handle output directory
     if os.path.exists(output_dir):
         print(f"⚠️  Output directory {output_dir} already exists!")
-        response = input("Do you want to recreate it? This will delete existing data (y/n): ").lower()
+        response = 'y' if force else input(
+            "Do you want to recreate it? This will delete existing data (y/n): ").lower()
         if response == 'y':
             print(f"🗑️  Removing existing directory...")
             shutil.rmtree(output_dir)
@@ -60,11 +68,13 @@ def extract_evaluation_stories(model_name):
 
     # Process individualistic stories (inverse transformation)
     print(f"\n📚 Processing individualistic stories (inverse transformation)...")
-    process_individualistic_stories(model_name, individualistic_dir, original_individualistic_dir, inverse_optimal_csv)
+    process_individualistic_stories(model_name, individualistic_dir, original_individualistic_dir,
+                                    inverse_optimal_csv, baseline_dir)
 
     # Process collectivistic stories (forward transformation)
     print(f"\n📚 Processing collectivistic stories (forward transformation)...")
-    process_collectivistic_stories(model_name, collectivistic_dir, original_collectivistic_dir, forward_optimal_csv)
+    process_collectivistic_stories(model_name, collectivistic_dir, original_collectivistic_dir,
+                                   forward_optimal_csv, baseline_dir)
 
     print(f"\n🎉 Successfully extracted all evaluation stories!")
     print(f"📁 Output structure:")
@@ -73,7 +83,8 @@ def extract_evaluation_stories(model_name):
     print(f"   └── collectivistic/ (original collectivistic + abduction/baseline → individualistic)")
 
 
-def process_individualistic_stories(model_name, output_dir, original_dir, optimal_csv):
+def process_individualistic_stories(model_name, output_dir, original_dir, optimal_csv,
+                                    baseline_dir="output/baseline"):
     """Process individualistic stories with inverse transformation"""
 
     # Check if optimal iterations CSV exists
@@ -116,7 +127,7 @@ def process_individualistic_stories(model_name, output_dir, original_dir, optima
             continue
 
         # Path to baseline transformed story (individualistic -> collectivistic)
-        baseline_story_path = f"output/baseline/{model_name}/inverse/{story_name}/transformed_story.txt"
+        baseline_story_path = f"{baseline_dir}/{model_name}/inverse/{story_name}/transformed_story.txt"
         if not os.path.exists(baseline_story_path):
             print(f"   ⚠️  Baseline transformed story not found: {baseline_story_path}")
             # continue
@@ -143,7 +154,8 @@ def process_individualistic_stories(model_name, output_dir, original_dir, optima
     print(f"\n✅ Processed {processed_count} individualistic stories")
 
 
-def process_collectivistic_stories(model_name, output_dir, original_dir, optimal_csv):
+def process_collectivistic_stories(model_name, output_dir, original_dir, optimal_csv,
+                                   baseline_dir="output/baseline"):
     """Process collectivistic stories with forward transformation"""
 
     # Check if optimal iterations CSV exists
@@ -186,7 +198,7 @@ def process_collectivistic_stories(model_name, output_dir, original_dir, optimal
             continue
 
         # Path to baseline transformed story (collectivistic -> individualistic)
-        baseline_story_path = f"output/baseline/{model_name}/forward/{story_name}/transformed_story.txt"
+        baseline_story_path = f"{baseline_dir}/{model_name}/forward/{story_name}/transformed_story.txt"
         if not os.path.exists(baseline_story_path):
             print(f"   ⚠️  Baseline transformed story not found: {baseline_story_path}")
             continue
@@ -273,6 +285,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Extract all stories for evaluation with abduction and baseline transformations")
     parser.add_argument("--model_name", help="Model name (e.g., gpt-4o, claude-sonnet-4-5)")
+    parser.add_argument("--baseline-dir", default="output/baseline",
+                        help="Baseline transforms dir (default output/baseline; e.g. output/baseline_cot)")
+    parser.add_argument("--output-dir", dest="eval_root", default="evaluation_data",
+                        help="Root output folder (default evaluation_data; e.g. evaluation_data_cot)")
+    parser.add_argument("--force", action="store_true",
+                        help="Recreate an existing output dir without prompting")
     parser.add_argument("--info", action="store_true", help="Show info about extracted stories")
 
     args = parser.parse_args()
@@ -281,7 +299,8 @@ if __name__ == "__main__":
         show_evaluation_info(args.model_name)
     else:
         try:
-            extract_evaluation_stories(args.model_name)
+            extract_evaluation_stories(args.model_name, baseline_dir=args.baseline_dir,
+                                       eval_root=args.eval_root, force=args.force)
             show_evaluation_info(args.model_name)
 
             print(f"\n🚀 Evaluation data ready!")

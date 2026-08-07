@@ -56,7 +56,8 @@ def create_model_comparison_df(
     models: list,
     problem_type: str,
     stat_type: str,
-    phase2_dir: str = "output_analysis/phase2"
+    phase2_dir: str = "output_analysis/phase2",
+    baseline_dir: str = "output_analysis/baseline"
 ) -> pd.DataFrame:
     """
     Create comparison DataFrame for a specific statistic.
@@ -85,7 +86,7 @@ def create_model_comparison_df(
 
         # Load baseline ratings
         sanitized_model = model.replace("/", "-").replace(":", "-")
-        baseline_file = Path("output_analysis/baseline") / sanitized_model / problem_type / "baseline_transformed_ratings.csv"
+        baseline_file = Path(baseline_dir) / sanitized_model / problem_type / "baseline_transformed_ratings.csv"
 
         if baseline_file.exists():
             df_baseline = pd.read_csv(baseline_file)
@@ -206,7 +207,8 @@ def generate_model_comparison_csvs(
     models: list,
     problem_type: str,
     phase2_dir: str = "output_analysis/phase2",
-    output_dir: str = "output_analysis/cross_model_summary"
+    output_dir: str = "output_analysis/cross_model_summary",
+    baseline_dir: str = "output_analysis/baseline"
 ):
     """
     Generate model comparison CSV files.
@@ -229,7 +231,7 @@ def generate_model_comparison_csvs(
 
     # Generate CSV for each statistic
     for stat in ['mean', 'median', 'mode']:
-        df = create_model_comparison_df(models, problem_type, stat, phase2_dir)
+        df = create_model_comparison_df(models, problem_type, stat, phase2_dir, baseline_dir)
 
         csv_file = output_path / f"model_comparison_{stat}.csv"
         df.to_csv(csv_file, index=False)
@@ -269,6 +271,9 @@ Examples:
     parser.add_argument('--problem', choices=['forward', 'inverse'], required=True)
     parser.add_argument('--phase2-dir', default='output_analysis/phase2')
     parser.add_argument('--output-dir', default='output_analysis/cross_model_summary')
+    parser.add_argument('--baseline-dir', default='output_analysis/baseline',
+                        help='Dir with <model>/<problem>/baseline_transformed_ratings.csv '
+                             '(default output_analysis/baseline; e.g. output_analysis/baseline_cot)')
     parser.add_argument('--verbose', action='store_true')
 
     args = parser.parse_args()
@@ -281,7 +286,8 @@ Examples:
             models=args.models,
             problem_type=args.problem,
             phase2_dir=args.phase2_dir,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            baseline_dir=args.baseline_dir
         )
         logger.info("\n✓ Complete!")
     except Exception as e:

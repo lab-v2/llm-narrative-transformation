@@ -146,7 +146,8 @@ def compute_js_divergence(dist_p, dist_q, smoothing=1e-5):
 # Main Processing
 # ==========================================================
 
-def process_stories(model_name, problem_type, output_dir='output_analysis/divergences'):
+def process_stories(model_name, problem_type, output_dir='output_analysis/divergences',
+                    baseline_dir='output/baseline'):
     """
     Process all stories and compute token-based divergences for all iterations.
 
@@ -174,7 +175,7 @@ def process_stories(model_name, problem_type, output_dir='output_analysis/diverg
 
     # Base paths
     abduction_base = Path(f'output/phase2/{sanitized_model}/{problem_type}')
-    baseline_base = Path(f'output/baseline/{sanitized_model}/{problem_type}')
+    baseline_base = Path(f'{baseline_dir}/{sanitized_model}/{problem_type}')
 
     # Get all story directories
     story_dirs = [d for d in abduction_base.iterdir() if d.is_dir()]
@@ -366,6 +367,14 @@ Examples:
     )
 
     parser.add_argument(
+        '--baseline-dir',
+        type=str,
+        default='output/baseline',
+        help='Baseline transforms dir to compare against abduction '
+             '(default: output/baseline; e.g. output/baseline_cot for the CoT baseline)'
+    )
+
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -385,7 +394,8 @@ Examples:
         process_stories(
             model_name=args.model,
             problem_type=args.problem,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            baseline_dir=args.baseline_dir
         )
 
         logger.info("\n✓ Processing complete!")

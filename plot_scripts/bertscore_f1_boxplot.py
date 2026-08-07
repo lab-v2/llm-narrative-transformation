@@ -99,7 +99,10 @@ def create_bertscore_f1_boxplot(
         df: pd.DataFrame,
         model: str,
         problem_type: str,
-        output_path: Path
+        output_path: Path,
+        baseline_label: str = 'Baseline',
+        y_min: float = 0.75,
+        y_max: float = 1.01
 ):
     """
     Create BERTScore F1 box plot.
@@ -116,7 +119,7 @@ def create_bertscore_f1_boxplot(
 
     # Prepare data for box plot
     data_to_plot = [baseline_vals, abductive_vals]
-    labels = ['Baseline', 'Abduction-Guided']
+    labels = [baseline_label, 'Abduction-Guided']
     colors = [COLOR_BASELINE, COLOR_ABDUCTIVE]
 
     logger.info(f"Baseline: {len(baseline_vals)} values")
@@ -162,7 +165,7 @@ def create_bertscore_f1_boxplot(
         label.set_fontweight('bold')
 
     # Set y-axis limits zoomed to BERTScore F1 range (typically 0.75-1.0)
-    ax.set_ylim(0.75, 1.01)
+    ax.set_ylim(y_min, y_max)
 
     # Grid
     ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5, zorder=0)
@@ -198,7 +201,10 @@ def create_bertscore_f1_boxplot_main(
         problem_type: str,
         bertscore_dir: str = "output_analysis/bert_scores_csv",
         output_dir: str = "output_analysis/plots",
-        exclude_stories: list = None
+        exclude_stories: list = None,
+        baseline_label: str = 'Baseline',
+        y_min: float = 0.75,
+        y_max: float = 1.01
 ):
     """
     Create BERTScore F1 box plot.
@@ -222,7 +228,7 @@ def create_bertscore_f1_boxplot_main(
     output_file = plot_dir / "bertscore_f1_boxplot.png"
 
     create_bertscore_f1_boxplot(
-        df, model, problem_type, output_file
+        df, model, problem_type, output_file, baseline_label, y_min, y_max
     )
 
     logger.info("\n" + "=" * 60)
@@ -256,6 +262,10 @@ Examples:
     parser.add_argument('--bertscore-dir', default='output_analysis/bert_scores_csv')
     parser.add_argument('--output-dir', default='output_analysis/plots')
     parser.add_argument('--exclude', nargs='*', dest='exclude_stories', help='Stories to exclude')
+    parser.add_argument('--baseline-label', default='Baseline',
+                        help="Label for the left box (default: Baseline; e.g. 'CoT')")
+    parser.add_argument('--y-min', type=float, default=0.75, help='Y-axis min (default 0.75)')
+    parser.add_argument('--y-max', type=float, default=1.01, help='Y-axis max (default 1.01)')
     parser.add_argument('--verbose', action='store_true')
 
     args = parser.parse_args()
@@ -269,7 +279,10 @@ Examples:
             problem_type=args.problem,
             bertscore_dir=args.bertscore_dir,
             output_dir=args.output_dir,
-            exclude_stories=args.exclude_stories
+            exclude_stories=args.exclude_stories,
+            baseline_label=args.baseline_label,
+            y_min=args.y_min,
+            y_max=args.y_max
         )
         logger.info("\n✓ Complete!")
     except Exception as e:

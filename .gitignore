@@ -17,6 +17,7 @@ output_analysis/*
 # large data & results dirs — copy to other machines out-of-band, don't version
 original_output/
 evaluation_data/
+evaluation_data_*/
 survey/
 plots/
 temp_dele/

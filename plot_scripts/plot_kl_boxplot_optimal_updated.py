@@ -100,7 +100,8 @@ def create_optimal_kl_boxplot(
         model: str,
         problem_type: str,
         output_path: Path,
-        max_y_tick: float = 4.0
+        max_y_tick: float = 4.0,
+        baseline_label: str = 'Baseline'
 ):
     """
     Create KL divergence box plot using optimal iteration.
@@ -135,7 +136,7 @@ def create_optimal_kl_boxplot(
 
     # Prepare data for box plot
     data_to_plot = [baseline_vals, optimal_vals]
-    labels = ['Baseline', 'Abduction-Guided']
+    labels = [baseline_label, 'Abduction-Guided']
     colors = [COLOR_BASELINE, COLOR_ABDUCTIVE]
 
     logger.info(f"Baseline: {len(baseline_vals)} values")
@@ -219,7 +220,8 @@ def create_optimal_kl_boxplot_main(
         phase2_dir: str = "output_analysis/phase2",
         output_dir: str = "output_analysis/plots",
         exclude_stories: list = None,
-        max_y_tick: float = 4.0
+        max_y_tick: float = 4.0,
+        baseline_label: str = 'Baseline'
 ):
     """
     Create optimal KL divergence box plot.
@@ -243,7 +245,7 @@ def create_optimal_kl_boxplot_main(
     output_file = plot_dir / "kl_divergence_boxplot_optimal.png"
 
     create_optimal_kl_boxplot(
-        df_kl, df_optimal, model, problem_type, output_file, max_y_tick
+        df_kl, df_optimal, model, problem_type, output_file, max_y_tick, baseline_label
     )
 
     logger.info("\n" + "=" * 60)
@@ -279,6 +281,8 @@ Examples:
     parser.add_argument('--output-dir', default='output_analysis/plots')
     parser.add_argument('--exclude', nargs='*', dest='exclude_stories', help='Stories to exclude')
     parser.add_argument('--max-y-tick', type=float, default=4.0, help='Maximum y-axis tick value (default: 4.0)')
+    parser.add_argument('--baseline-label', default='Baseline',
+                        help="Label for the left box (default: Baseline; e.g. 'Chain-of-Thought')")
     parser.add_argument('--verbose', action='store_true')
 
     args = parser.parse_args()
@@ -294,7 +298,8 @@ Examples:
             phase2_dir=args.phase2_dir,
             output_dir=args.output_dir,
             exclude_stories=args.exclude_stories,
-            max_y_tick=args.max_y_tick
+            max_y_tick=args.max_y_tick,
+            baseline_label=args.baseline_label
         )
         logger.info("\n✓ Complete!")
     except Exception as e:
