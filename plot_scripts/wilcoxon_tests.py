@@ -152,6 +152,8 @@ def run():
                     choices=["diagnosis", "kl", "bertscore"])
     ap.add_argument("--analysis-dir", default="output_analysis")
     ap.add_argument("--output-dir", default="output_analysis/tables_baselines")
+    ap.add_argument("--run-batch", default="main",
+                    help="Provenance tag stamped on every row of wilcoxon_paper_export.csv")
     args = ap.parse_args()
 
     rows = []  # long format
@@ -205,6 +207,43 @@ def run():
     out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / "wilcoxon_all.csv", index=False)
     print(f"✓ saved {out/'wilcoxon_all.csv'}  ({len(df)} tests)")
+
+    # ---- paper export: one row per (direction, model, baseline, metric) ----
+    baseline_key = {"Zero-Shot": "zero_shot", "Few-Shot": "few_shot",
+                    "CoT": "cot", "Self-Refine": "self_refine"}
+    exp = df.copy()
+    exp["baseline"] = exp["baseline"].map(baseline_key)          # snake_case keys
+    exp = exp.rename(columns={"sig": "sig_marker", "n": "n_pairs"})
+    exp["run_batch"] = args.run_batch
+    # effect_r already oriented so + = abduction better; favors derived from it.
+    cols = ["direction", "model", "baseline", "metric", "median_abd", "median_base",
+            "median_diff", "effect_r", "p_raw", "p_holm", "sig_marker", "n_pairs",
+            "run_batch", "favors"]
+    exp = exp[cols].sort_values(["direction", "model", "baseline", "metric"])
+    exp.to_csv(out / "wilcoxon_paper_export.csv", index=False)
+    print(f"✓ saved {out/'wilcoxon_paper_export.csv'}  ({len(exp)} rows, run_batch={args.run_batch})")
+
+    # ---- Pareto cross-reference: cells where a baseline significantly beats abduction on
+    #      diagnosis (shift), with KL & BERTScore for the SAME cell (the fidelity price paid) ----
+    diag = df[(df.metric == "diagnosis") & (df.sig != "n.s.") & (df.favors != "Abduction")]
+    prows = []
+    for _, r in diag.iterrows():
+        rec = {"direction": r.direction, "model": r.model, "baseline": r.baseline,
+               "diag_favors": r.favors, "diag_effect_r": r.effect_r,
+               "diag_p_holm": r.p_holm, "diag_sig": r.sig}
+        for metric, pfx in [("kl", "kl"), ("bertscore", "bert")]:
+            mm = df[(df.metric == metric) & (df.direction == r.direction)
+                    & (df.model == r.model) & (df.baseline == r.baseline)]
+            if len(mm):
+                mm = mm.iloc[0]
+                rec[f"{pfx}_favors"] = mm.favors
+                rec[f"{pfx}_effect_r"] = mm.effect_r
+                rec[f"{pfx}_p_holm"] = mm.p_holm
+                rec[f"{pfx}_sig"] = mm.sig
+        prows.append(rec)
+    pareto = pd.DataFrame(prows).sort_values(["direction", "model", "baseline"]) if prows else pd.DataFrame(prows)
+    pareto.to_csv(out / "pareto_crossref.csv", index=False)
+    print(f"✓ saved {out/'pareto_crossref.csv'}  ({len(pareto)} cells where a baseline out-shifts abduction)")
 
     # paper-layout tables: one per direction, rows = model x baseline,
     # cols = <metric>_medianDiff / _p_holm / _sig

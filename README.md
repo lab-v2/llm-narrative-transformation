@@ -425,6 +425,24 @@ Gotchas / interpretation:
   significant in its favor in ~16–22 of 24 cells/metric, r≈0.85–0.97, survives Holm) and at
   **parity on shift** (diagnosis mostly `n.s.` or mixed) — the Pareto result.
 
+#### Pareto cross-reference
+
+The cells where a baseline **significantly out-shifts abduction** (diagnosis), cross-referenced
+with KL and BERTScore for the *same* cell — i.e. the fidelity price paid for that extra shift
+(from `pareto_crossref.csv`). Only **5 cells total, all DeepSeek-R1**; in every one, abduction
+wins **both** fidelity metrics at `***`.
+
+| Dir | Model | Baseline | Diagnosis (shift) | KL (fidelity) | BERTScore (fidelity) |
+|-----|-------|----------|-------------------|---------------|----------------------|
+| Forward | DeepSeek-R1 | Few-Shot | Baseline * (r −0.74) | Abd *** (r +1.00) | Abd *** (r +1.00) |
+| Inverse | DeepSeek-R1 | Zero-Shot | Baseline * (r −0.59) | Abd *** (r +0.84) | Abd *** (r +0.91) |
+| Inverse | DeepSeek-R1 | Few-Shot | Baseline ** (r −0.87) | Abd *** (r +0.85) | Abd *** (r +0.92) |
+| Inverse | DeepSeek-R1 | CoT | Baseline * (r −0.63) | Abd *** (r +0.92) | Abd *** (r +0.93) |
+| Inverse | DeepSeek-R1 | Self-Refine | Baseline *** (r −1.00) | Abd *** (r +0.97) | Abd *** (r +0.97) |
+
+Across all 6 models × 4 baselines × 2 directions, **no cell** has a baseline beating abduction on
+shift without a large, significant fidelity penalty.
+
 
 
 `plot_baselines_combined.py` draws one subfigure per model with **all 4 baselines
