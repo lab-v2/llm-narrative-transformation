@@ -425,6 +425,83 @@ Gotchas / interpretation:
   significant in its favor in ~16–22 of 24 cells/metric, r≈0.85–0.97, survives Holm) and at
   **parity on shift** (diagnosis mostly `n.s.` or mixed) — the Pareto result.
 
+#### How to read these tests (worked toy example)
+
+New to Wilcoxon / Holm? Run the hand-checkable 5-story demo — it uses the *same* three
+steps as `wilcoxon_tests.py` on toy data so you can see paired scores become a p-value,
+an effect size, and a Holm-corrected p:
+
+```bash
+python plot_scripts/wilcoxon_toy_example.py
+```
+
+**The idea.** Every test story is transformed by *both* Abduction and a baseline, so the data
+is **paired** — you can subtract the two scores story-by-story. The question is not "which
+average is bigger" but "**are Abduction's wins consistent enough that pure luck is an
+unconvincing explanation?**"
+
+**Step 1 — pair & subtract.** Toy: 5 stories, KL divergence (lower = better). `diff = abd − base`;
+a **negative** diff means Abduction had lower KL = Abduction won that story.
+
+| Story | Abduction | Baseline | diff | winner |
+|-------|:---:|:---:|:---:|:---:|
+| S1 | 0.8 | 1.5 | −0.70 | abduction |
+| S2 | 0.9 | 1.2 | −0.30 | abduction |
+| S3 | 1.0 | 0.9 | +0.10 | baseline |
+| S4 | 0.7 | 2.0 | −1.30 | abduction |
+| S5 | 1.1 | 1.4 | −0.30 | abduction |
+
+**Step 2 — Wilcoxon signed-rank.** Drop ties (diff = 0), rank the remaining diffs by **size**
+(ignoring sign; equal sizes share the average rank), then sum the ranks of the winners vs losers:
+
+| \|diff\| | 0.10 (S3) | 0.30 (S2) | 0.30 (S5) | 0.70 (S1) | 1.30 (S4) |
+|-------|:---:|:---:|:---:|:---:|:---:|
+| rank | 1 | 2.5 | 2.5 | 4 | 5 |
+
+- W⁺ (baseline won) = rank of S3 = **1**
+- W⁻ (abduction won) = 2.5 + 2.5 + 4 + 5 = **14**
+
+If the methods were truly equal, W⁺ and W⁻ would be close. 1 vs 14 is lopsided — and note
+Abduction's wins are the *big* diffs while its one loss is the *smallest*. Scipy turns that
+imbalance into a **p-value** = "probability of an imbalance this extreme if the methods were
+equal." Here `W = 1, p = 0.125` — **not** significant, because 5 stories is simply too few. That
+same lopsidedness on the real **28**-story samples is what drives the tiny p-values in the tables.
+Stars: `*<0.05  **<0.01  ***<0.001`, else `n.s.` (a non-significant result means *no evidence of a
+difference*, not proof of equivalence).
+
+**Step 3 — effect size (how one-sided).** p says *whether*; rank-biserial `r` says *how much*:
+`r = (W⁺ − W⁻) / [n(n+1)/2] = (1 − 14)/15 = −0.867`, ranging −1 (baseline swept) to +1 (Abduction
+swept). Because KL is "lower is better," the script **flips the sign** so the convention is uniform
+across every metric: **`effect_r` > 0 ⇒ Abduction better** (here −0.867 → **+0.867**). `favors` is
+read off this sign, *not* off the median diff — diagnosis ratings are discrete 1–5, so their median
+diff is often `0.0` even when the test is clearly significant.
+
+**Step 4 — Holm correction (the "4 tries" penalty).** Per `model × direction × metric` you compare
+Abduction against **4** baselines. Running 4 tests inflates the chance of a fluke "hit," so Holm
+raises the bar: sort the 4 raw p's, multiply the smallest by 4, next by 3, then 2, then 1 (cap at 1):
+
+| baseline | raw p | ×factor | p_holm | sig? |
+|----------|:---:|:---:|:---:|:---:|
+| Zero-Shot | 0.0003 | ×4 | 0.0012 | yes |
+| Few-Shot | 0.0010 | ×3 | 0.0030 | yes |
+| CoT | 0.0200 | ×2 | 0.0400 | yes |
+| Self-Refine | 0.3000 | ×1 | 0.3000 | no |
+
+Holm is a less-blunt Bonferroni (which would multiply *all* by 4, pushing 0.02 → 0.08 = not
+significant; Holm keeps it at 0.04 = significant). **All stars in the tables come from `p_holm`,**
+so every reported effect already survived this penalty.
+
+**Reading a real row** — GPT-5.2, forward, KL, Zero-Shot: `median_abd 0.81 vs median_base 1.50,
+effect_r +0.675, p_holm 0.0012 (**), n_pairs 28` ⇒ *"across all 28 forward stories Abduction was
+more faithful (lower KL); the advantage is large (r ≈ +0.68) and survives Holm — not luck."*
+Its inverse KL counterpart (`effect_r +0.227, p_holm 0.34, n.s.`) ⇒ *"leaned Abduction's way but
+within chance — no significant difference detected."*
+
+> **Why `n_pairs` varies:** KL/BERTScore have one value per story with no ties ⇒ **n = 28**.
+> Diagnosis is a discrete 1–5 rating, so many stories tie (diff = 0) and drop out ⇒ **n < 28**
+> (e.g. 18–20) — expected, not missing data. (An `n < 28` on *KL/BERTScore* would instead mean a
+> failed/empty generation, like the GPT-5.2 zero-shot bug fixed earlier.)
+
 #### Pareto cross-reference
 
 The cells where a baseline **significantly out-shifts abduction** (diagnosis), cross-referenced
