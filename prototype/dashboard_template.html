@@ -1,0 +1,711 @@
+<title>LLM-Free Survey Scorecard</title>
+<style>
+/* Layout: one reading column; summary tiles, then charts, then drill-down (heatmap -> confusion matrices -> stories). */
+:root {
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --hairline: rgba(11, 11, 11, 0.10);
+  --hover: rgba(11, 11, 11, 0.04);
+  /* model identity (categorical, fixed order) + the LLM reference */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --llm: #898781;
+  /* sequential blue (confusion-matrix counts): low -> high */
+  --c0: #f1f0ec; --c1: #cde2fb; --c2: #9ec5f4; --c3: #6da7ec; --c4: #2a78d6; --c5: #184f95;
+  /* diverging QWK: red (worse than chance) <- gray (chance) -> blue (agreement) */
+  --n4: #b3292a; --n3: #d64545; --n2: #ec8f8e; --n1: #f6c9c8;
+  --z0: #f0efec;
+  --p1: #cde2fb; --p2: #86b6ef; --p3: #3987e5; --p4: #1c5cab;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --hairline: rgba(255, 255, 255, 0.10); --hover: rgba(255, 255, 255, 0.05);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --llm: #898781;
+    --c0: #222220; --c1: #15304f; --c2: #1c4a80; --c3: #2a6cc0; --c4: #5598e7; --c5: #9ec5f4;
+    --n4: #f08a89; --n3: #d95a5a; --n2: #9a3434; --n1: #4d2525;
+    --z0: #383835;
+    --p1: #15304f; --p2: #1c5cab; --p3: #3987e5; --p4: #86b6ef;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --hairline: rgba(255, 255, 255, 0.10); --hover: rgba(255, 255, 255, 0.05);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --llm: #898781;
+  --c0: #222220; --c1: #15304f; --c2: #1c4a80; --c3: #2a6cc0; --c4: #5598e7; --c5: #9ec5f4;
+  --n4: #f08a89; --n3: #d95a5a; --n2: #9a3434; --n1: #4d2525;
+  --z0: #383835;
+  --p1: #15304f; --p2: #1c5cab; --p3: #3987e5; --p4: #86b6ef;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 56px; display: flex; flex-direction: column; gap: 22px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+h1 { font-size: 28px; line-height: 1.15; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 17px; font-weight: 650; }
+h3 { font-size: 13px; font-weight: 600; }
+p { margin: 0; }
+.eyebrow { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lede { color: var(--ink-2); max-width: 72ch; }
+.note { color: var(--muted); font-size: 12.5px; max-width: 80ch; }
+.mono { font-family: var(--mono); font-size: 12px; }
+header { display: flex; flex-direction: column; gap: 8px; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile .label { color: var(--ink-2); font-size: 12.5px; }
+.tile .value { font-size: 30px; font-weight: 650; line-height: 1.2; }
+.tile .sub { color: var(--muted); font-size: 12px; }
+
+.card { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.card-head > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 22px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-2); font-size: 12.5px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.key-bar { width: 12px; height: 10px; border-radius: 2px; display: inline-block; }
+.key-tick { width: 2px; height: 12px; background: var(--ink-2); display: inline-block; }
+.key-line { width: 14px; height: 2px; display: inline-block; }
+
+.chart { width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { font-family: var(--font); }
+
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--ink-2); font-weight: 600; font-size: 12px; }
+th:first-child, td:first-child { text-align: left; }
+td.name { display: flex; align-items: center; gap: 8px; }
+tbody tr:last-child td { border-bottom: none; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-width: 0; max-width: 100%; }
+select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; padding: 6px 10px; }
+select { max-width: 100%; min-width: 0; }
+button { cursor: pointer; }
+button:hover { background: var(--hover); }
+:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+label.ctl { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 12.5px; min-width: 0; max-width: 100%; }
+label.ctl select { flex: 1 1 auto; min-width: 0; width: 100%; text-overflow: ellipsis; }
+
+/* per-question heatmap */
+.heat td.cell { text-align: center; font-weight: 600; min-width: 64px; padding: 0; }
+.heat td.cell div { margin: 2px; padding: 6px 4px; border-radius: 4px; }
+.heat tbody tr { cursor: pointer; }
+.heat tbody tr:hover td { background: var(--hover); }
+.heat .qcomp { color: var(--ink-2); white-space: normal; min-width: 180px; }
+.dist { display: inline-flex; align-items: flex-end; gap: 2px; height: 22px; vertical-align: middle; }
+.dist i { width: 6px; background: var(--muted); border-radius: 2px 2px 0 0; display: block; }
+.scale { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-2); }
+.scale i { width: 26px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* confusion matrices */
+.cms { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 18px; }
+.cm { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cm-title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.cm-stats { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cm-grid { display: grid; grid-template-columns: 22px repeat(5, minmax(0, 1fr)); gap: 2px; font-variant-numeric: tabular-nums; }
+.cm-grid .h { color: var(--muted); font-size: 11px; display: flex; align-items: center; justify-content: center; }
+.cm-grid .c { aspect-ratio: 1 / 1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12.5px; max-width: 100%; }
+.cm-grid .c.diag { font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.cm-grid .c.zero { color: var(--muted); }
+.cm-axis { color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; }
+
+/* story explorer */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--axis); background: var(--surface); color: var(--ink); }
+.chip[aria-pressed="true"] { border-color: var(--ink-2); background: var(--hover); font-weight: 600; }
+.rating { display: inline-block; min-width: 22px; text-align: center; font-weight: 600; }
+.delta { color: var(--muted); font-size: 11.5px; margin-left: 4px; display: inline-block; min-width: 18px; text-align: left; }
+.delta.off2 { color: var(--ink); font-weight: 600; }
+.mae-row { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 12.5px; }
+.mae-row span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* tooltip */
+#tip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--hairline);
+  border-radius: 8px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12); max-width: 280px; }
+#tip strong { display: block; font-size: 14px; }
+#tip .t2 { color: var(--ink-2); }
+[data-tip] { cursor: default; }
+.hit:hover .mark { opacity: 0.85; }
+
+footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 4px; max-width: 90ch; }
+
+@media (max-width: 860px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 440px) {
+  .wrap { padding-inline: 16px; }
+  .tile .value { font-size: 24px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cm-grid .c, .heat td.cell div { transition: background-color 0.15s ease; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow" id="eyebrow">LLM-free survey prototype · test set</span>
+    <h1>LLM-Free Survey Scorecard</h1>
+    <p class="lede" id="lede"></p>
+  </header>
+
+  <section class="tiles" id="tiles" aria-label="Headline numbers"></section>
+
+  <section class="grid2">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Agreement with the LLM survey</h2>
+          <p class="note">Mean quadratic weighted kappa (QWK) over the 20 questions. 0 = chance, 1 = identical to the LLM.</p>
+        </div>
+      </div>
+      <div class="legend" id="ci-legend"></div>
+      <div class="chart" id="ci-chart"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2 id="diff-title">Difference from the reference model</h2>
+          <p class="note">Paired bootstrap over stories. A range that does not cross 0 is a real difference, not luck.</p>
+        </div>
+      </div>
+      <div class="chart" id="diff-chart"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><h2>All accuracy scores</h2>
+      <p class="note">Balanced accuracy: about 0.20–0.25 for always predicting one rating. 3-level groups ratings as 1–2 / 3 / 4–5.</p></div></div>
+    <div class="scroll"><table id="acc-table"></table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Time and cost per story</h2>
+        <p class="note">From reading the story file to having all 20 ratings. One-time setup (loading the model, opening the API client) is not counted.</p>
+      </div>
+    </div>
+    <div class="chart" id="speed-chart"></div>
+    <div class="scroll"><table id="speed-table"></table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Agreement by question</h2>
+        <p class="note">QWK per question. Click a row to open its confusion matrices below.</p>
+      </div>
+      <div class="controls">
+        <label class="ctl" for="heat-sort">Sort
+          <select id="heat-sort"></select>
+        </label>
+      </div>
+    </div>
+    <div class="scale" id="heat-scale"></div>
+    <div class="scroll"><table class="heat" id="heat-table"></table></div>
+  </section>
+
+  <section class="card" id="cm-card">
+    <div class="card-head">
+      <div>
+        <h2>Confusion matrices</h2>
+        <p class="note">Rows: the LLM's rating. Columns: the model's prediction. Outlined cells on the diagonal are exact matches.</p>
+      </div>
+      <div class="controls">
+        <label class="ctl" for="cm-question">Question
+          <select id="cm-question"></select>
+        </label>
+      </div>
+    </div>
+    <div class="cms" id="cms"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>By story type</h2>
+        <p class="note" id="group-note"></p>
+      </div>
+    </div>
+    <div class="grid2" id="group-charts"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Story explorer</h2>
+        <p class="note">Each model's 20 ratings next to the LLM's. The small number shows how far off a prediction is.</p>
+      </div>
+      <div class="controls">
+        <label class="ctl" for="story-select">Story
+          <select id="story-select"></select>
+        </label>
+      </div>
+    </div>
+    <div>
+      <p class="note" style="margin-bottom:6px">Hardest stories (largest average error across models):</p>
+      <div class="chips" id="hard-chips"></div>
+    </div>
+    <div class="mae-row" id="story-mae"></div>
+    <div class="scroll"><table id="story-table"></table></div>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+<div id="tip" hidden></div>
+
+<script id="dashboard-data" type="application/json">__DATA__</script>
+<script>
+(function () {
+  "use strict";
+  const D = JSON.parse(document.getElementById("dashboard-data").textContent);
+  const M = D.models;
+  const Q = D.question_ids.length;
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const color = (m) => `var(--s${M.indexOf(m) + 1})`;   // for HTML styles
+  const colorVal = (m) => css(`--s${M.indexOf(m) + 1}`);  // resolved value, for SVG attributes
+  const fmt = (v, d = 3) => (v === null || v === undefined ? "–" : Number(v).toFixed(d));
+  const sgn = (v, d = 3) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(d);
+  const el = (tag, attrs = {}, text) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const NS = "http://www.w3.org/2000/svg";
+  const svgEl = (tag, attrs = {}, text) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const overall = Object.fromEntries(D.overall.map((r) => [r.model, r]));
+  const timing = D.timing;
+  const llmRow = timing[0];
+  const timingOf = Object.fromEntries(timing.slice(1).map((r) => [r.system, r]));
+  const groups = [...new Set(D.by_group.map((r) => r.group))];
+  const groupN = Object.fromEntries(D.by_group.map((r) => [r.group, r.n_stories]));
+  const best = [...M].sort((a, b) => overall[b].qwk - overall[a].qwk)[0];
+
+  // ---------- tooltip ----------
+  const tip = document.getElementById("tip");
+  function showTip(evt, lines) {
+    tip.replaceChildren();
+    lines.forEach((line, i) => tip.appendChild(el(i === 0 ? "strong" : "div", i ? { class: "t2" } : {}, line)));
+    tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    let x = evt.clientX + 14, y = evt.clientY + 14;
+    if (x + r.width > window.innerWidth - 8) x = evt.clientX - r.width - 14;
+    if (y + r.height > window.innerHeight - 8) y = evt.clientY - r.height - 14;
+    tip.style.left = Math.max(8, x) + "px";
+    tip.style.top = Math.max(8, y) + "px";
+  }
+  document.addEventListener("pointermove", (evt) => {
+    const t = evt.target.closest && evt.target.closest("[data-tip]");
+    if (t) showTip(evt, t.dataset.tip.split("\n")); else tip.hidden = true;
+  });
+  document.addEventListener("focusin", (evt) => {
+    const t = evt.target.closest && evt.target.closest("[data-tip]");
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    showTip({ clientX: r.right, clientY: r.top }, t.dataset.tip.split("\n"));
+  });
+  document.addEventListener("focusout", () => { tip.hidden = true; });
+
+  // ---------- header + tiles ----------
+  const groupText = groups.map((g) => `${groupN[g]} ${g}`).join(", ");
+  document.getElementById("lede").textContent =
+    `Can a small model on OpenAI embeddings replace the 20-question ${D.llm_model} survey? ` +
+    `${D.n_stories} held-out stories (${groupText}), each model's ratings compared question by question with the LLM's.`;
+
+  function renderTiles() {
+    const t = timingOf[best];
+    const tiles = [
+      { label: `Best agreement (${best})`, value: fmt(overall[best].qwk), sub: `QWK · 95% range ${fmt(overall[best].qwk_ci_low, 2)}–${fmt(overall[best].qwk_ci_high, 2)}` },
+      { label: "Within ±1 of the LLM", value: Math.round(overall[best].within1_acc * 100) + "%", sub: `${best}, all questions · exact ${Math.round(overall[best].exact_acc * 100)}%` },
+      { label: "Faster than the LLM survey", value: t.speedup_vs_llm.toFixed(1) + "×", sub: `${t.mean_s.toFixed(2)} s vs ${llmRow.mean_s.toFixed(2)} s per story` },
+      { label: "Cheaper than the LLM survey", value: t.cost_per_story_usd > 0 ? Math.round(llmRow.cost_per_story_usd / t.cost_per_story_usd) + "×" : "–", sub: `$${t.cost_per_story_usd.toFixed(5)} vs $${llmRow.cost_per_story_usd.toFixed(4)} per story` },
+    ];
+    const box = document.getElementById("tiles");
+    box.replaceChildren(...tiles.map((x) => {
+      const d = el("div", { class: "tile" });
+      d.append(el("span", { class: "label" }, x.label), el("span", { class: "value" }, x.value), el("span", { class: "sub" }, x.sub));
+      return d;
+    }));
+  }
+
+  // ---------- shared chart helpers ----------
+  function axis(svg, x, ticks, top, bottom, fmtTick) {
+    ticks.forEach((v) => {
+      svg.appendChild(svgEl("line", { x1: x(v), x2: x(v), y1: top, y2: bottom, stroke: v === 0 ? css("--axis") : css("--grid"), "stroke-width": 1 }));
+      svg.appendChild(svgEl("text", { x: x(v), y: bottom + 16, "text-anchor": "middle", "font-size": 11, fill: css("--muted") }, fmtTick(v)));
+    });
+  }
+  function niceTicks(lo, hi, step) {
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000);
+    return out;
+  }
+  function rowLabel(svg, x, y, name, swatch) {
+    const g = svgEl("g");
+    if (swatch) g.appendChild(svgEl("circle", { cx: x + 5, cy: y, r: 5, fill: swatch }));
+    g.appendChild(svgEl("text", { x: x + (swatch ? 16 : 0), y: y + 4, "font-size": 12.5, fill: css("--ink") }, name));
+    svg.appendChild(g);
+  }
+
+  // ---------- agreement (CI) chart ----------
+  function renderCI() {
+    const box = document.getElementById("ci-chart");
+    const W = Math.max(300, box.clientWidth), rowH = 40, top = 8, labelW = 108, rightW = 54;
+    const H = top + M.length * rowH + 26;
+    const lo = Math.min(0, ...M.map((m) => Math.min(overall[m].qwk_ci_low, overall[m].cv_qwk ?? 1))) - 0.02;
+    const domLo = Math.floor(lo * 10) / 10, domHi = 1;
+    const x = (v) => labelW + ((v - domLo) / (domHi - domLo)) * (W - labelW - rightW);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Test QWK per model with 95% range and cross-validation QWK" });
+    axis(svg, x, niceTicks(domLo, domHi, 0.2), top, top + M.length * rowH, (v) => v.toFixed(1));
+    M.forEach((m, i) => {
+      const y = top + i * rowH + rowH / 2, o = overall[m];
+      rowLabel(svg, 0, y, m, colorVal(m));
+      const g = svgEl("g", { class: "hit", tabindex: 0,
+        "data-tip": `${fmt(o.qwk)} test QWK\n${m} · 95% range ${fmt(o.qwk_ci_low)}–${fmt(o.qwk_ci_high)}\ncross-validation QWK ${fmt(o.cv_qwk)}` });
+      g.appendChild(svgEl("rect", { x: labelW - 6, y: y - rowH / 2, width: W - labelW + 6, height: rowH, fill: "transparent" }));
+      g.appendChild(svgEl("line", { class: "mark", x1: x(o.qwk_ci_low), x2: x(o.qwk_ci_high), y1: y, y2: y, stroke: colorVal(m), "stroke-width": 2, "stroke-linecap": "round" }));
+      if (o.cv_qwk !== null && o.cv_qwk !== undefined)
+        g.appendChild(svgEl("line", { x1: x(o.cv_qwk), x2: x(o.cv_qwk), y1: y - 9, y2: y + 9, stroke: css("--ink-2"), "stroke-width": 2 }));
+      g.appendChild(svgEl("circle", { class: "mark", cx: x(o.qwk), cy: y, r: 5.5, fill: colorVal(m), stroke: css("--surface"), "stroke-width": 2 }));
+      g.appendChild(svgEl("text", { x: W - rightW + 8, y: y + 4, "font-size": 12.5, "font-weight": 600, fill: css("--ink") }, fmt(o.qwk)));
+      svg.appendChild(g);
+    });
+    box.replaceChildren(svg);
+    const lg = document.getElementById("ci-legend");
+    lg.replaceChildren();
+    const a = el("span"); a.append(el("i", { class: "key-dot", style: `background:${css("--ink-2")}` }), document.createTextNode("Test QWK, line = 95% range"));
+    const b = el("span"); b.append(el("i", { class: "key-tick" }), document.createTextNode("Cross-validation QWK on train"));
+    lg.append(a, b);
+  }
+
+  // ---------- paired differences ----------
+  function renderDiff() {
+    const box = document.getElementById("diff-chart");
+    const others = M.filter((m) => m !== D.reference_model);
+    document.getElementById("diff-title").textContent = `Difference from ${D.reference_model}`;
+    if (!others.length) { box.replaceChildren(el("p", { class: "note" }, "Only one model was evaluated.")); return; }
+    const W = Math.max(280, box.clientWidth), rowH = 52, top = 8, labelW = 108, rightW = 8;
+    const H = top + others.length * rowH + 26;
+    const ext = Math.max(0.1, ...others.map((m) => Math.max(Math.abs(D.diffs[m].low), Math.abs(D.diffs[m].high)))) * 1.15;
+    const step = ext > 0.4 ? 0.2 : 0.1;
+    const domHi = Math.ceil(ext / step) * step, domLo = -domHi;
+    const x = (v) => labelW + ((v - domLo) / (domHi - domLo)) * (W - labelW - rightW);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `QWK difference from ${D.reference_model} with 95% range` });
+    axis(svg, x, niceTicks(domLo, domHi, step), top, top + others.length * rowH, (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(1));
+    others.forEach((m, i) => {
+      const y = top + i * rowH + rowH / 2 - 6, d = D.diffs[m];
+      const real = d.low > 0 || d.high < 0;
+      rowLabel(svg, 0, y, m, colorVal(m));
+      svg.appendChild(svgEl("text", { x: 16, y: y + 19, "font-size": 11, fill: css("--muted") }, real ? "real difference" : "could be chance"));
+      const g = svgEl("g", { class: "hit", tabindex: 0,
+        "data-tip": `${sgn(d.diff)} QWK vs ${D.reference_model}\n${m} · 95% range ${sgn(d.low)} to ${sgn(d.high)}\n${real ? "Range excludes 0: a real difference" : "Range includes 0: could be chance"}` });
+      g.appendChild(svgEl("rect", { x: labelW - 6, y: y - rowH / 2 + 6, width: W - labelW + 6, height: rowH, fill: "transparent" }));
+      g.appendChild(svgEl("line", { class: "mark", x1: x(d.low), x2: x(d.high), y1: y, y2: y, stroke: colorVal(m), "stroke-width": 2, "stroke-linecap": "round" }));
+      g.appendChild(svgEl("circle", { class: "mark", cx: x(d.diff), cy: y, r: 5.5, fill: colorVal(m), stroke: css("--surface"), "stroke-width": 2 }));
+      const lx = x(d.diff), anchor = lx > (labelW + W) / 2 ? "end" : "start";
+      g.appendChild(svgEl("text", { x: lx + (anchor === "end" ? -10 : 10), y: y - 9, "text-anchor": anchor, "font-size": 12, "font-weight": 600, fill: css("--ink") }, sgn(d.diff)));
+      svg.appendChild(g);
+    });
+    box.replaceChildren(svg);
+  }
+
+  // ---------- accuracy table ----------
+  function renderAccTable() {
+    const t = document.getElementById("acc-table");
+    const head = ["Model", "Test QWK", "95% range", "CV QWK", "Balanced acc.", "Exact", "Within ±1", "QWK, 3-level", "Balanced acc., 3-level"];
+    const thead = el("thead"), tr = el("tr");
+    head.forEach((h) => tr.appendChild(el("th", {}, h)));
+    thead.appendChild(tr);
+    const tbody = el("tbody");
+    M.forEach((m) => {
+      const o = overall[m], r = el("tr"), c = el("td");
+      c.append(el("i", { class: "key-dot", style: `background:${color(m)};margin-right:8px` }), document.createTextNode(m));
+      r.appendChild(c);
+      [fmt(o.qwk), `${fmt(o.qwk_ci_low)}–${fmt(o.qwk_ci_high)}`, fmt(o.cv_qwk), fmt(o.balanced_acc), fmt(o.exact_acc),
+       fmt(o.within1_acc), fmt(o.qwk_3level), fmt(o.balanced_acc_3level)].forEach((v) => r.appendChild(el("td", {}, v)));
+      tbody.appendChild(r);
+    });
+    t.replaceChildren(thead, tbody);
+  }
+
+  // ---------- speed ----------
+  function renderSpeed() {
+    const box = document.getElementById("speed-chart");
+    const rows = [{ name: "LLM survey", r: llmRow, col: "var(--llm)", colVal: css("--llm") },
+                  ...M.map((m) => ({ name: m, r: timingOf[m], col: color(m), colVal: colorVal(m) }))];
+    const W = Math.max(300, box.clientWidth), rowH = 34, top = 6, labelW = 108, rightW = 64, barH = 18;
+    const H = top + rows.length * rowH + 26;
+    const maxV = Math.max(...rows.map((d) => d.r.mean_s));
+    const step = maxV > 4 ? 1 : 0.5;
+    const domHi = Math.ceil((maxV * 1.02) / step) * step;
+    const x = (v) => labelW + (v / domHi) * (W - labelW - rightW);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Mean time per story" });
+    axis(svg, x, niceTicks(0, domHi, step), top, top + rows.length * rowH, (v) => v + " s");
+    rows.forEach((d, i) => {
+      const y = top + i * rowH + rowH / 2;
+      rowLabel(svg, 0, y, d.name, d.colVal);
+      const w = Math.max(2, x(d.r.mean_s) - x(0)), x0 = x(0), rad = Math.min(4, w / 2);
+      const tipLines = d.name === "LLM survey"
+        ? [`${d.r.mean_s.toFixed(2)} s per story (mean)`, `LLM survey · median ${d.r.median_s.toFixed(2)} s, max ${d.r.max_s.toFixed(2)} s`, `$${d.r.cost_per_story_usd.toFixed(4)} per story`]
+        : [`${d.r.mean_s.toFixed(2)} s per story (mean)`, `${d.name} · embedding ${d.r.embed_mean_s.toFixed(2)} s + model ${d.r.predict_mean_ms.toFixed(2)} ms`, `${d.r.speedup_vs_llm.toFixed(1)}× faster · $${d.r.cost_per_story_usd.toFixed(5)} per story`];
+      const g = svgEl("g", { class: "hit", tabindex: 0, "data-tip": tipLines.join("\n") });
+      g.appendChild(svgEl("rect", { x: labelW - 6, y: y - rowH / 2, width: W - labelW + 6, height: rowH, fill: "transparent" }));
+      g.appendChild(svgEl("path", { class: "mark", fill: d.colVal,
+        d: `M${x0},${y - barH / 2} h${w - rad} a${rad},${rad} 0 0 1 ${rad},${rad} v${barH - 2 * rad} a${rad},${rad} 0 0 1 ${-rad},${rad} h${-(w - rad)} z` }));
+      g.appendChild(svgEl("text", { x: x0 + w + 8, y: y + 4, "font-size": 12.5, "font-weight": 600, fill: css("--ink") }, d.r.mean_s.toFixed(2) + " s"));
+      svg.appendChild(g);
+    });
+    box.replaceChildren(svg);
+
+    const t = document.getElementById("speed-table");
+    const head = ["System", "Mean s", "Median s", "Max s", "Embedding s", "Model ms", "$ per story", `$ for ${D.n_stories} stories`, "Model size", "Speed-up"];
+    const thead = el("thead"), tr = el("tr");
+    head.forEach((h) => tr.appendChild(el("th", {}, h)));
+    thead.appendChild(tr);
+    const tbody = el("tbody");
+    rows.forEach((d) => {
+      const r = el("tr"), c = el("td");
+      c.append(el("i", { class: "key-bar", style: `background:${d.col};margin-right:8px` }), document.createTextNode(d.name === "LLM survey" ? `LLM survey (${D.llm_model})` : d.name));
+      r.appendChild(c);
+      const v = d.r;
+      [v.mean_s.toFixed(2), v.median_s.toFixed(2), v.max_s.toFixed(2), v.embed_mean_s === null ? "–" : v.embed_mean_s.toFixed(2),
+       v.predict_mean_ms === null ? "–" : v.predict_mean_ms.toFixed(2), "$" + v.cost_per_story_usd.toFixed(5), "$" + v.cost_total_usd.toFixed(4),
+       v.model_size_mb === null ? "–" : v.model_size_mb.toFixed(2) + " MB", v.speedup_vs_llm.toFixed(1) + "×"].forEach((x) => r.appendChild(el("td", {}, x)));
+      tbody.appendChild(r);
+    });
+    t.replaceChildren(thead, tbody);
+  }
+
+  // ---------- per-question heatmap ----------
+  const QWK_BINS = [[-Infinity, -0.7, "--n4"], [-0.7, -0.5, "--n3"], [-0.5, -0.3, "--n2"], [-0.3, -0.1, "--n1"], [-0.1, 0.1, "--z0"],
+                    [0.1, 0.3, "--p1"], [0.3, 0.5, "--p2"], [0.5, 0.7, "--p3"], [0.7, Infinity, "--p4"]];
+  const qwkToken = (v) => QWK_BINS.find(([lo, hi]) => v >= lo && v < hi)[2];
+  function inkOn(token) {
+    const probe = el("span", { style: `color:var(${token})` });
+    document.body.appendChild(probe);
+    const [r, g, b] = getComputedStyle(probe).color.match(/\d+(\.\d+)?/g).map(Number);
+    probe.remove();
+    const lum = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * lum(r) + 0.7152 * lum(g) + 0.0722 * lum(b) > 0.3 ? "#0b0b0b" : "#ffffff";
+  }
+  const sortSel = document.getElementById("heat-sort");
+  sortSel.append(el("option", { value: "q" }, "Question order"), ...M.map((m) => el("option", { value: m }, `${m} QWK, high to low`)));
+  sortSel.addEventListener("change", renderHeat);
+  function renderHeat() {
+    const scale = document.getElementById("heat-scale");
+    scale.replaceChildren(el("span", {}, "worse than chance"));
+    QWK_BINS.forEach(([lo, hi, tok]) => scale.appendChild(el("i", {
+      style: `background:var(${tok})`, "data-tip": `QWK ${lo === -Infinity ? "below " + hi : hi === Infinity ? lo + " and above" : lo + " to " + hi}` })));
+    scale.appendChild(el("span", {}, "agrees with the LLM"));
+
+    const order = [...Array(Q).keys()];
+    if (sortSel.value !== "q") order.sort((a, b) => D.per_question[sortSel.value][b].qwk - D.per_question[sortSel.value][a].qwk);
+    const t = document.getElementById("heat-table");
+    const thead = el("thead"), tr = el("tr");
+    tr.append(el("th", {}, "Question"), el("th", { style: "text-align:left" }, "Component"), el("th", { style: "text-align:center" }, "LLM ratings 1–5"));
+    M.forEach((m) => { const th = el("th", { style: "text-align:center" }); th.append(el("i", { class: "key-dot", style: `background:${color(m)};margin-right:6px` }), document.createTextNode(m)); tr.appendChild(th); });
+    thead.appendChild(tr);
+    const tbody = el("tbody");
+    const inkCache = {};
+    order.forEach((q) => {
+      const r = el("tr", { tabindex: 0, "aria-label": `Open confusion matrices for q${D.question_ids[q]}` });
+      r.addEventListener("click", () => openCM(q));
+      r.addEventListener("keydown", (e) => { if (e.key === "Enter") openCM(q); });
+      r.appendChild(el("td", { class: "mono" }, "q" + D.question_ids[q]));
+      r.appendChild(el("td", { class: "qcomp", style: "text-align:left" }, D.components[q]));
+      const counts = D.test_counts[q].split("/").map(Number), maxC = Math.max(1, ...counts);
+      const dist = el("span", { class: "dist", "data-tip": `${counts.join(" / ")}\nLLM ratings 1 / 2 / 3 / 4 / 5 on q${D.question_ids[q]}` });
+      counts.forEach((c) => dist.appendChild(el("i", { style: `height:${Math.max(1, (c / maxC) * 22)}px` })));
+      const dc = el("td", { style: "text-align:center" }); dc.appendChild(dist); r.appendChild(dc);
+      M.forEach((m) => {
+        const pq = D.per_question[m][q], tok = qwkToken(pq.qwk);
+        inkCache[tok] = inkCache[tok] || inkOn(tok);
+        const td = el("td", { class: "cell" });
+        td.appendChild(el("div", { style: `background:var(${tok});color:${inkCache[tok]}`,
+          "data-tip": `${fmt(pq.qwk)} QWK\n${m} · q${D.question_ids[q]} ${D.components[q]}\nexact ${fmt(pq.exact_acc, 2)} · within ±1 ${fmt(pq.within1_acc, 2)} · balanced acc. ${fmt(pq.balanced_acc, 2)}` }, fmt(pq.qwk, 2)));
+        r.appendChild(td);
+      });
+      tbody.appendChild(r);
+    });
+    t.replaceChildren(thead, tbody);
+  }
+
+  // ---------- confusion matrices ----------
+  const cmSel = document.getElementById("cm-question");
+  cmSel.appendChild(el("option", { value: "all" }, `All ${Q} questions combined`));
+  D.question_ids.forEach((id, q) => cmSel.appendChild(el("option", { value: String(q) }, `q${id} · ${D.components[q]}`)));
+  cmSel.addEventListener("change", renderCM);
+  function openCM(q) {
+    cmSel.value = String(q);
+    renderCM();
+    document.getElementById("cm-card").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  }
+  function matrixFor(m) {
+    if (cmSel.value !== "all") return D.confusion[m][Number(cmSel.value)];
+    const tot = [...Array(5)].map(() => Array(5).fill(0));
+    D.confusion[m].forEach((cm) => cm.forEach((row, i) => row.forEach((v, j) => (tot[i][j] += v))));
+    return tot;
+  }
+  function renderCM() {
+    const box = document.getElementById("cms");
+    const all = cmSel.value === "all";
+    const qLabel = all ? `all ${Q} questions` : `q${D.question_ids[Number(cmSel.value)]}`;
+    const inkCache = {};
+    box.replaceChildren(...M.map((m) => {
+      const cm = matrixFor(m);
+      const maxV = Math.max(1, ...cm.flat());
+      const total = cm.flat().reduce((a, b) => a + b, 0);
+      const exact = cm.reduce((a, row, i) => a + row[i], 0);
+      const within = cm.reduce((a, row, i) => a + row.reduce((s, v, j) => s + (Math.abs(i - j) <= 1 ? v : 0), 0), 0);
+      const card = el("div", { class: "cm" });
+      const title = el("div", { class: "cm-title" });
+      title.append(el("i", { class: "key-dot", style: `background:${color(m)}` }), document.createTextNode(m));
+      const stats = all ? `QWK ${fmt(overall[m].qwk)} (mean over questions) · exact ${Math.round(100 * exact / total)}% · within ±1 ${Math.round(100 * within / total)}%`
+                        : `QWK ${fmt(D.per_question[m][Number(cmSel.value)].qwk)} · exact ${exact}/${total} · within ±1 ${within}/${total}`;
+      const grid = el("div", { class: "cm-grid", role: "table", "aria-label": `${m} confusion matrix for ${qLabel}` });
+      grid.appendChild(el("span", { class: "h" }));
+      for (let j = 0; j < 5; j++) grid.appendChild(el("span", { class: "h" }, String(j + 1)));
+      cm.forEach((row, i) => {
+        grid.appendChild(el("span", { class: "h" }, String(i + 1)));
+        row.forEach((v, j) => {
+          const bin = v === 0 ? 0 : Math.min(5, 1 + Math.floor((v / maxV) * 4.999));
+          const tok = `--c${bin}`;
+          inkCache[tok] = inkCache[tok] || inkOn(tok);
+          grid.appendChild(el("span", {
+            class: "c" + (i === j ? " diag" : "") + (v === 0 ? " zero" : ""), tabindex: v ? 0 : -1,
+            style: `background:var(${tok});` + (v ? `color:${inkCache[tok]}` : ""),
+            "data-tip": `${v} ${all ? "answers" : v === 1 ? "story" : "stories"}\nLLM said ${i + 1}, ${m} predicted ${j + 1}${i === j ? " (exact)" : ""}` }, v ? String(v) : "·"));
+        });
+      });
+      const axisRow = el("div", { class: "cm-axis" });
+      axisRow.append(el("span", {}, "rows: LLM rating"), el("span", {}, "columns: predicted"));
+      card.append(title, el("div", { class: "cm-stats" }, stats), grid, axisRow);
+      return card;
+    }));
+  }
+
+  // ---------- by story type ----------
+  function renderGroups() {
+    document.getElementById("group-note").textContent =
+      `Mean QWK over the 20 questions within each group. ${groups.map((g) => `${g}: ${groupN[g]} stories`).join(" · ")}. Small groups give rough estimates.`;
+    const box = document.getElementById("group-charts");
+    box.replaceChildren(...groups.map((g) => {
+      const wrap = el("div", { style: "display:flex;flex-direction:column;gap:6px;min-width:0" });
+      wrap.appendChild(el("h3", {}, `${g[0].toUpperCase() + g.slice(1)} (${groupN[g]} stories)`));
+      const chart = el("div", { class: "chart" });
+      wrap.appendChild(chart);
+      requestAnimationFrame(() => {
+        const rows = D.by_group.filter((r) => r.group === g);
+        const W = Math.max(260, chart.clientWidth), rowH = 32, top = 4, labelW = 96, rightW = 52, barH = 16;
+        const H = top + rows.length * rowH + 26;
+        const domLo = Math.min(0, Math.floor(Math.min(...rows.map((r) => r.qwk)) * 10) / 10), domHi = 1;
+        const x = (v) => labelW + ((v - domLo) / (domHi - domLo)) * (W - labelW - rightW);
+        const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `QWK per model, ${g} stories` });
+        axis(svg, x, niceTicks(domLo, domHi, 0.2), top, top + rows.length * rowH, (v) => v.toFixed(1));
+        rows.forEach((r, i) => {
+          const y = top + i * rowH + rowH / 2;
+          rowLabel(svg, 0, y, r.model, colorVal(r.model));
+          const x0 = x(0), x1 = x(r.qwk), left = Math.min(x0, x1), w = Math.max(2, Math.abs(x1 - x0)), rad = Math.min(4, w / 2);
+          const g2 = svgEl("g", { class: "hit", tabindex: 0,
+            "data-tip": `${fmt(r.qwk)} QWK\n${r.model} · ${g} (${r.n_stories} stories)\nexact ${fmt(r.exact_acc, 2)} · within ±1 ${fmt(r.within1_acc, 2)} · balanced acc. ${fmt(r.balanced_acc, 2)}` });
+          g2.appendChild(svgEl("rect", { x: labelW - 6, y: y - rowH / 2, width: W - labelW + 6, height: rowH, fill: "transparent" }));
+          const path = r.qwk >= 0
+            ? `M${left},${y - barH / 2} h${w - rad} a${rad},${rad} 0 0 1 ${rad},${rad} v${barH - 2 * rad} a${rad},${rad} 0 0 1 ${-rad},${rad} h${-(w - rad)} z`
+            : `M${left + w},${y - barH / 2} h${-(w - rad)} a${rad},${rad} 0 0 0 ${-rad},${rad} v${barH - 2 * rad} a${rad},${rad} 0 0 0 ${rad},${rad} h${w - rad} z`;
+          g2.appendChild(svgEl("path", { class: "mark", d: path, fill: colorVal(r.model) }));
+          g2.appendChild(svgEl("text", { x: Math.max(x0, x1) + 8, y: y + 4, "font-size": 12, "font-weight": 600, fill: css("--ink") }, fmt(r.qwk)));
+          svg.appendChild(g2);
+        });
+        chart.replaceChildren(svg);
+      });
+      return wrap;
+    }));
+  }
+
+  // ---------- story explorer ----------
+  const avgErr = (s) => M.reduce((a, m) => a + s.mae[m], 0) / M.length;
+  const storiesByErr = [...D.stories].sort((a, b) => avgErr(b) - avgErr(a));
+  const storySel = document.getElementById("story-select");
+  storiesByErr.forEach((s) => storySel.appendChild(el("option", { value: s.name },
+    `${s.name.replace(/_/g, " ")} · ${s.label} · avg error ${avgErr(s).toFixed(2)}`)));
+  storySel.addEventListener("change", renderStory);
+  const chipBox = document.getElementById("hard-chips");
+  storiesByErr.slice(0, 6).forEach((s) => {
+    const b = el("button", { class: "chip", type: "button", "aria-pressed": "false", "data-story": s.name }, s.name.replace(/_/g, " "));
+    b.addEventListener("click", () => { storySel.value = s.name; renderStory(); });
+    chipBox.appendChild(b);
+  });
+  function renderStory() {
+    const s = D.stories.find((x) => x.name === storySel.value) || storiesByErr[0];
+    chipBox.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.story === s.name)));
+    const mae = document.getElementById("story-mae");
+    mae.replaceChildren(el("span", {}, `${s.label} · average distance from the LLM's rating:`), ...M.map((m) => {
+      const sp = el("span"); sp.append(el("i", { class: "key-dot", style: `background:${color(m)}` }), document.createTextNode(`${m} ${s.mae[m].toFixed(2)}`)); return sp;
+    }));
+    const t = document.getElementById("story-table");
+    const thead = el("thead"), tr = el("tr");
+    tr.append(el("th", {}, "Question"), el("th", { style: "text-align:left" }, "Component"), el("th", { style: "text-align:center" }, "LLM"));
+    M.forEach((m) => { const th = el("th", { style: "text-align:center" }); th.append(el("i", { class: "key-dot", style: `background:${color(m)};margin-right:6px` }), document.createTextNode(m)); tr.appendChild(th); });
+    thead.appendChild(tr);
+    const tbody = el("tbody");
+    D.question_ids.forEach((id, q) => {
+      const r = el("tr");
+      r.append(el("td", { class: "mono" }, "q" + id), el("td", { class: "qcomp", style: "text-align:left;white-space:normal" }, D.components[q]));
+      const llm = s.llm[q];
+      const lc = el("td", { style: "text-align:center" }); lc.appendChild(el("span", { class: "rating" }, String(llm))); r.appendChild(lc);
+      M.forEach((m) => {
+        const p = s.pred[m][q], d = p - llm;
+        const td = el("td", { style: "text-align:center", "data-tip": `${p} predicted\n${m} · LLM rated ${llm}${d ? ` (off by ${Math.abs(d)})` : " (exact)"}` });
+        td.append(el("span", { class: "rating" }, String(p)), el("span", { class: "delta" + (Math.abs(d) >= 2 ? " off2" : "") }, d === 0 ? "=" : (d > 0 ? "+" : "−") + Math.abs(d)));
+        r.appendChild(td);
+      });
+      tbody.appendChild(r);
+    });
+    t.replaceChildren(thead, tbody);
+  }
+
+  // ---------- footer ----------
+  const ft = document.getElementById("footer");
+  ft.append(
+    el("p", {}, `Reference: the ${D.llm_model} survey's ratings (one call per story, 20 questions, 1 = entirely individual perspective … 5 = entirely group/community perspective).`),
+    el("p", {}, `QWK = quadratic weighted kappa: agreement on an ordered scale with partial credit for near misses, 0 = chance. 95% ranges from ${D.bootstrap} bootstrap resamples of the stories; differences use the same resamples.`),
+    el("p", {}, "Cross-validation QWK comes from 3 repeats of 5-fold cross-validation on the training stories. Generated by prototype/make_dashboard.py from evaluate.py's summary.json."));
+
+  // ---------- render + re-render on theme / size changes ----------
+  function renderAll() {
+    renderTiles(); renderCI(); renderDiff(); renderAccTable(); renderSpeed(); renderHeat(); renderCM(); renderGroups(); renderStory();
+  }
+  renderAll();
+  let raf = 0;
+  const rerenderCharts = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { renderCI(); renderDiff(); renderSpeed(); renderGroups(); renderHeat(); renderCM(); }); };
+  window.addEventListener("resize", rerenderCharts);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", rerenderCharts);
+  new MutationObserver(rerenderCharts).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
