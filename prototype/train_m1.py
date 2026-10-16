@@ -45,7 +45,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.decomposition import PCA
-from sklearn.metrics import balanced_accuracy_score, cohen_kappa_score, confusion_matrix
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import balanced_accuracy_score, cohen_kappa_score, confusion_matrix, f1_score, roc_auc_score
 from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
@@ -60,6 +61,17 @@ SEED = 42
 N_CLASSES = 5                              # ratings 1..5 -> class 0..4
 TO_3_LEVEL = np.array([0, 0, 1, 2, 2])     # 1-2 low, 3 mid, 4-5 high
 METRIC_NAMES = ["qwk", "balanced_acc", "exact_acc", "within1_acc", "qwk_3level", "balanced_acc_3level"]
+YES_NO_SCALE = "yes/no (1/0)"   # survey_story.py's answer_scale for a yes/no questionnaire
+
+
+def answer_values(scale: str) -> list:
+    """Raw answer values for a survey's answer_scale: yes/no -> [0, 1]; the 1-5 survey -> [1, 2, 3, 4, 5]."""
+    return [0, 1] if scale == YES_NO_SCALE else [1, 2, 3, 4, 5]
+
+
+def metric_names(n_classes: int) -> list:
+    """Yes/no: kappa (stored as "qwk"; QWK on two classes is plain kappa), balanced acc, accuracy, F1 of yes, AUC."""
+    return ["qwk", "balanced_acc", "exact_acc", "f1_yes", "auc"] if n_classes == 2 else METRIC_NAMES
 
 
 # ==========================================================
@@ -83,7 +95,7 @@ def load_data(embeddings_dir: Path, survey_dir: Path, split_csv: Path):
     if missing:
         sys.exit(f"Stories missing from {split_csv}: {missing}")
 
-    X, Y, emb_models, question_ids, questions_file = [], [], set(), None, None
+    X, Y, emb_models, question_ids, questions_file, scale = [], [], set(), None, None, None
     for name in names:
         with open(emb_files[name], encoding="utf-8") as f:
             emb = json.load(f)
@@ -94,11 +106,15 @@ def load_data(embeddings_dir: Path, survey_dir: Path, split_csv: Path):
         if question_ids is None:
             question_ids = sorted(ratings, key=int)
             questions_file = survey.get("questions_file")
-        if sorted(ratings, key=int) != question_ids or any(ratings[q] not in range(1, N_CLASSES + 1) for q in question_ids):
+            scale = survey.get("answer_scale", "1-5")
+            values = answer_values(scale)
+        if survey.get("answer_scale", "1-5") != scale:
+            sys.exit(f"{name}: answer scale {survey.get('answer_scale', '1-5')} differs from the other stories ({scale})")
+        if sorted(ratings, key=int) != question_ids or any(ratings[q] not in values for q in question_ids):
             sys.exit(f"{name}: survey ratings incomplete or don't match the other stories")
 
         X.append(emb["embedding"])
-        Y.append([ratings[q] - 1 for q in question_ids])
+        Y.append([values.index(ratings[q]) for q in question_ids])
         emb_models.add(emb["model"])
 
     if len(emb_models) != 1:
@@ -113,7 +129,10 @@ def load_data(embeddings_dir: Path, survey_dir: Path, split_csv: Path):
         "names": names,
         "groups": np.array([group[n] for n in names]),
         "X": np.asarray(X, dtype=np.float32),
-        "Y": np.asarray(Y, dtype=np.int64),          # (N, Q), classes 0..4
+        "Y": np.asarray(Y, dtype=np.int64),          # (N, Q), class = index into answer_values
+        "n_classes": len(values),
+        "answer_values": values,                     # [1..5], or [0, 1] for yes/no
+        "answer_scale": scale,
         "question_ids": question_ids,
         "components": [components.get(q, "") for q in question_ids],
         "embedding_model": emb_models.pop(),
@@ -149,11 +168,11 @@ class PerQuestionMLP(nn.Module):
         return h
 
 
-def class_weights(Y: np.ndarray) -> torch.Tensor:
+def class_weights(Y: np.ndarray, n_classes: int = N_CLASSES) -> torch.Tensor:
     """(N, Q) -> (Q, C): n / (n_present_classes * count) per class, 0 for absent classes."""
-    weights = np.zeros((Y.shape[1], N_CLASSES), dtype=np.float32)
+    weights = np.zeros((Y.shape[1], n_classes), dtype=np.float32)
     for q in range(Y.shape[1]):
-        counts = np.bincount(Y[:, q], minlength=N_CLASSES)
+        counts = np.bincount(Y[:, q], minlength=n_classes)
         present = counts > 0
         weights[q, present] = len(Y) / (present.sum() * counts[present])
     return torch.from_numpy(weights)
@@ -214,18 +233,44 @@ def to_features(pca, scaler, X: np.ndarray) -> np.ndarray:
     return Z
 
 
-def train(Z: np.ndarray, Y: np.ndarray, args, seed: int) -> PerQuestionMLP:
+def train(Z: np.ndarray, Y: np.ndarray, args, seed: int, n_classes: int = N_CLASSES) -> PerQuestionMLP:
     """Z: (N, F) shared by all questions, or (Q, N, F) per question."""
     torch.manual_seed(seed)
-    model = PerQuestionMLP(Y.shape[1], Z.shape[-1], tuple(args.hidden), N_CLASSES, args.dropout)
+    model = PerQuestionMLP(Y.shape[1], Z.shape[-1], tuple(args.hidden), n_classes, args.dropout)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    x, y, cw = torch.from_numpy(Z), torch.from_numpy(Y.T.copy()), class_weights(Y)
+    x, y, cw = torch.from_numpy(Z), torch.from_numpy(Y.T.copy()), class_weights(Y, n_classes)
     loss_fn = LOSSES[getattr(args, "loss", "ce")]
     model.train()
     for _ in range(args.steps):
         opt.zero_grad()
         loss_fn(model(x), y, cw).backward()
         opt.step()
+    return model
+
+
+def train_logreg(Z: np.ndarray, Y: np.ndarray, C: float, n_classes: int = N_CLASSES) -> PerQuestionMLP:
+    """One L2-regularized logistic regression per question (rare answers weighted up, like the networks),
+    packed into a PerQuestionMLP with no hidden layer so prediction code is unchanged."""
+    Q, k = Y.shape[1], Z.shape[1]
+    W = np.zeros((Q, k, n_classes), dtype=np.float32)
+    b = np.full((Q, 1, n_classes), -1e4, dtype=np.float32)       # answers never seen in training stay impossible
+    for q in range(Q):
+        classes = np.unique(Y[:, q])
+        if len(classes) == 1:
+            b[q, 0, classes[0]] = 0.0
+            continue
+        with np.errstate(**FP_IGNORE):
+            clf = LogisticRegression(C=C, class_weight="balanced", max_iter=5000).fit(Z, Y[:, q])
+        if len(classes) == 2:                                      # sklearn: P(classes[1]) = sigmoid(w.z + b)
+            W[q, :, classes[1]] = clf.coef_[0]
+            b[q, 0, classes[0]], b[q, 0, classes[1]] = 0.0, clf.intercept_[0]
+        else:                                                      # multinomial: softmax(coef.z + intercept)
+            W[q][:, classes] = clf.coef_.T
+            b[q, 0, classes] = clf.intercept_
+    model = PerQuestionMLP(Q, k, (), n_classes, 0.0)
+    with torch.no_grad():
+        model.weights[0].copy_(torch.from_numpy(W))
+        model.biases[0].copy_(torch.from_numpy(b))
     return model
 
 
@@ -240,7 +285,17 @@ def predict_proba(model: PerQuestionMLP, Z: np.ndarray) -> np.ndarray:
 # Metrics
 # ==========================================================
 
-def question_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> list:
+def question_metrics(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int = N_CLASSES, probs: np.ndarray = None) -> list:
+    """Metrics in metric_names(n_classes) order. probs (N, C) is only needed for the yes/no AUC."""
+    if n_classes == 2:
+        auc = roc_auc_score(y_true, probs[:, 1]) if probs is not None and len(np.unique(y_true)) == 2 else np.nan
+        return [
+            float(np.nan_to_num(cohen_kappa_score(y_true, y_pred, weights="quadratic", labels=[0, 1]))),
+            balanced_accuracy_score(y_true, y_pred),
+            float(np.mean(y_true == y_pred)),
+            f1_score(y_true, y_pred, pos_label=1, zero_division=0),
+            float(auc),
+        ]
     t3, p3 = TO_3_LEVEL[y_true], TO_3_LEVEL[y_pred]
     return [
         float(np.nan_to_num(cohen_kappa_score(y_true, y_pred, weights="quadratic", labels=range(N_CLASSES)))),
@@ -271,19 +326,22 @@ def write_cv_outputs(output_dir: Path, data: dict, oof: np.ndarray, title: str, 
     write cv_per_question.csv, cv_oof_predictions.csv and cv_report.txt. Returns (mean metrics, summary text)."""
     Y, groups = data["Y"], data["groups"]
     N, Q = Y.shape
+    n = data.get("n_classes", N_CLASSES)
+    vals = data.get("answer_values", list(range(1, N_CLASSES + 1)))
+    names = metric_names(n)
     pred = decode(oof, decode_mode)                                 # (R, Q, N)
-    per_repeat = np.array([[question_metrics(Y[:, q], pred[r, q]) for q in range(Q)]
+    per_repeat = np.array([[question_metrics(Y[:, q], pred[r, q], n, oof[r, q]) for q in range(Q)]
                            for r in range(repeats)])               # (R, Q, M)
-    per_q = per_repeat.mean(0)                                      # (Q, M)
-    mean = per_q.mean(0)                                            # (M,)
+    per_q = np.nanmean(per_repeat, axis=0)                          # (Q, M)
+    mean = np.nanmean(per_q, axis=0)                                # (M,)
     qwk_sd = per_repeat[:, :, 0].mean(1).std()
-    train_counts = ["/".join(str(n) for n in np.bincount(Y[:, q], minlength=N_CLASSES)) for q in range(Q)]
-    confusions = [sum(confusion_matrix(Y[:, q], pred[r, q], labels=range(N_CLASSES))
+    train_counts = ["/".join(str(c) for c in np.bincount(Y[:, q], minlength=n)) for q in range(Q)]
+    confusions = [sum(confusion_matrix(Y[:, q], pred[r, q], labels=range(n))
                       for r in range(repeats)) for q in range(Q)]
 
     with open(output_dir / "cv_per_question.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["question_id", "component", "train_counts_1to5", *METRIC_NAMES])
+        writer.writerow(["question_id", "component", f"train_counts_{vals[0]}to{vals[-1]}", *names])
         for q in range(Q):
             writer.writerow([data["question_ids"][q], data["components"][q], train_counts[q],
                              *[round(float(v), 4) for v in per_q[q]]])
@@ -291,13 +349,32 @@ def write_cv_outputs(output_dir: Path, data: dict, oof: np.ndarray, title: str, 
     with open(output_dir / "cv_oof_predictions.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["story_name", "label", "repeat", "question_id", "true_rating", "pred_rating",
-                         *[f"p{r}" for r in range(1, N_CLASSES + 1)]])
+                         *[f"p{v}" for v in vals]])
         for r in range(repeats):
             for q in range(Q):
                 for i in range(N):
                     p = oof[r, q, i]
-                    writer.writerow([data["names"][i], groups[i], r, data["question_ids"][q], Y[i, q] + 1,
-                                     int(pred[r, q, i]) + 1, *[round(float(v), 4) for v in p]])
+                    writer.writerow([data["names"][i], groups[i], r, data["question_ids"][q], vals[Y[i, q]],
+                                     vals[int(pred[r, q, i])], *[round(float(v), 4) for v in p]])
+
+    if n == 2:
+        lines = [
+            f"{title} | {N} train stories | {Q} questions | yes/no answers | {repeats}x{folds}-fold CV ({cv_s:.1f}s)",
+            f"Setting: {setting}",
+            "",
+            "Mean over questions (out-of-fold, averaged over repeats):",
+            f"  kappa={mean[0]:.3f} (sd over repeats {qwk_sd:.3f})  balanced_acc={mean[1]:.3f}  accuracy={mean[2]:.3f}  "
+            f"F1(yes)={mean[3]:.3f}  AUC={mean[4]:.3f}",
+            "  (kappa 0 = chance, 1 = perfect; balanced_acc and AUC 0.5 = chance)",
+            "",
+            "Per question:",
+            f"  {'q':>4} {'train no/yes':>13} {'kappa':>6} {'balacc':>6} {'acc':>6} {'F1yes':>6} {'AUC':>6}  component",
+        ]
+        for q in range(Q):
+            m = per_q[q]
+            lines.append(f"  {data['question_ids'][q]:>4} {train_counts[q]:>13} {m[0]:>6.3f} {m[1]:>6.3f} {m[2]:>6.3f} "
+                         f"{m[3]:>6.3f} {m[4]:>6.3f}  {data['components'][q]}")
+        return _finish_report(output_dir, data, lines, confusions, vals, repeats, mean)
 
     lines = [
         f"{title} | {N} train stories | {Q} questions | {repeats}x{folds}-fold CV ({cv_s:.1f}s)",
@@ -316,14 +393,19 @@ def write_cv_outputs(output_dir: Path, data: dict, oof: np.ndarray, title: str, 
         m = per_q[q]
         lines.append(f"  {data['question_ids'][q]:>4} {train_counts[q]:>17} {m[0]:>6.3f} {m[1]:>6.3f} {m[2]:>6.3f} "
                      f"{m[3]:>7.3f} {m[4]:>6.3f}  {data['components'][q]}")
+    return _finish_report(output_dir, data, lines, confusions, vals, repeats, mean)
+
+
+def _finish_report(output_dir: Path, data: dict, lines: list, confusions: list, vals: list, repeats: int, mean):
+    """Append the confusion matrices, write cv_report.txt; return (mean metrics, summary text)."""
     summary_len = len(lines)
     lines += ["", f"Confusion matrices (rows = LLM rating, cols = predicted; summed over {repeats} repeats, "
                   f"so each story counts {repeats}x):"]
-    for q in range(Q):
+    for q in range(len(data["question_ids"])):
         lines.append(f"  q{data['question_ids'][q]} {data['components'][q]}")
-        lines.append("        " + " ".join(f"{p:>4}" for p in range(1, N_CLASSES + 1)))
-        for t in range(N_CLASSES):
-            lines.append(f"     {t + 1}: " + " ".join(f"{v:>4}" for v in confusions[q][t]))
+        lines.append("        " + " ".join(f"{p:>4}" for p in vals))
+        for t, v_true in enumerate(vals):
+            lines.append(f"     {v_true}: " + " ".join(f"{v:>4}" for v in confusions[q][t]))
     (output_dir / "cv_report.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     return mean, "\n".join(lines[:summary_len])
@@ -342,6 +424,10 @@ def main():
     parser.add_argument("--output-dir", type=str, required=True, help="Where to write CV results and the final model")
     # Model setting
     parser.add_argument("--pca-k", type=int, default=32, help="PCA components (default: 32)")
+    parser.add_argument("--classifier", choices=["mlp", "logreg"], default="mlp",
+                        help="mlp = small neural network per question (default); logreg = L2 logistic regression per question")
+    parser.add_argument("--C", type=float, default=0.01,
+                        help="[logreg] inverse regularization strength; smaller = stronger (default: 0.01)")
     parser.add_argument("--hidden", type=int, nargs="*", default=[64, 32],
                         help="Hidden layer sizes, e.g. --hidden 64 32 (default); --hidden with no values = no hidden layer")
     parser.add_argument("--dropout", type=float, default=0.3, help="Dropout (default: 0.3)")
@@ -366,40 +452,49 @@ def main():
     data = load_data(Path(args.embeddings_dir), Path(args.survey_dir), Path(args.split_csv))
     X, Y, groups = data["X"], data["Y"], data["groups"]
     N, Q = Y.shape
+    n_classes = data["n_classes"]
     hidden_str = "-".join(map(str, args.hidden)) or "none"
-    setting = (f"pca_k={args.pca_k} hidden={hidden_str} dropout={args.dropout} "
-               f"weight_decay={args.weight_decay} steps={args.steps} lr={args.lr} loss={args.loss} decode={args.decode}")
+    if args.classifier == "logreg":
+        args.hidden = []
+        setting = f"pca_k={args.pca_k} classifier=logreg C={args.C} class_weight=balanced decode={args.decode}"
+    else:
+        setting = (f"pca_k={args.pca_k} hidden={hidden_str} dropout={args.dropout} "
+                   f"weight_decay={args.weight_decay} steps={args.steps} lr={args.lr} loss={args.loss} decode={args.decode}")
+    title = "M1 per-question logistic regression" if args.classifier == "logreg" else "M1 per-question MLP"
+    fit = (lambda Z, Yt, seed: train_logreg(Z, Yt, args.C, n_classes)) if args.classifier == "logreg" else \
+          (lambda Z, Yt, seed: train(Z, Yt, args, seed=seed, n_classes=n_classes))
     group_counts = {str(g): int(n) for g, n in zip(*np.unique(groups, return_counts=True))}
-    logger.info(f"{N} stories ({group_counts}), {Q} questions, "
+    logger.info(f"{N} stories ({group_counts}), {Q} questions, answers {data['answer_scale']}, "
                 f"embeddings {data['embedding_model']} ({X.shape[1]} dims)")
     logger.info(f"Setting: {setting} | {args.repeats}x{args.folds}-fold CV")
 
     # ---------- Cross-validation ----------
-    oof = np.zeros((args.repeats, Q, N, N_CLASSES), dtype=np.float32)
+    oof = np.zeros((args.repeats, Q, N, n_classes), dtype=np.float32)
     cv = RepeatedStratifiedKFold(n_splits=args.folds, n_repeats=args.repeats, random_state=SEED)
     cv_start = time.perf_counter()
     for fold_i, (tr, va) in enumerate(cv.split(X, groups)):
         pca, scaler = fit_features(X[tr], args.pca_k)
-        model = train(to_features(pca, scaler, X[tr]), Y[tr], args, seed=SEED + fold_i)
+        model = fit(to_features(pca, scaler, X[tr]), Y[tr], SEED + fold_i)
         oof[fold_i // args.folds][:, va] = predict_proba(model, to_features(pca, scaler, X[va]))
     cv_s = time.perf_counter() - cv_start
     logger.info(f"CV done: {args.repeats * args.folds} fold runs in {cv_s:.1f}s")
 
-    mean, summary = write_cv_outputs(output_dir, data, oof, "M1 per-question MLP", setting,
+    mean, summary = write_cv_outputs(output_dir, data, oof, title, setting,
                                      args.folds, args.repeats, cv_s, args.decode)
 
     # ---------- Final model on all train stories ----------
     final_start = time.perf_counter()
     pca, scaler = fit_features(X, args.pca_k)
-    model = train(to_features(pca, scaler, X), Y, args, seed=SEED)
+    model = fit(to_features(pca, scaler, X), Y, SEED)
     final_s = time.perf_counter() - final_start
 
     final_config = {
-        "model": "M1 per-question MLP",
+        "model": title, "classifier": args.classifier, "C": args.C if args.classifier == "logreg" else None,
         "pca_k": args.pca_k, "hidden": list(args.hidden), "dropout": args.dropout,
         "weight_decay": args.weight_decay, "steps": args.steps, "lr": args.lr,
         "loss": args.loss, "decode": args.decode,
-        "n_classes": N_CLASSES, "question_ids": data["question_ids"], "components": data["components"],
+        "n_classes": n_classes, "answer_values": data["answer_values"], "answer_scale": data["answer_scale"],
+        "question_ids": data["question_ids"], "components": data["components"],
         "embedding_model": data["embedding_model"], "embedding_dim": int(X.shape[1]),
         "train_stories": data["names"], "seed": SEED,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
@@ -414,7 +509,7 @@ def main():
     }, output_dir / "m1_final.pt")
     with open(output_dir / "m1_final_config.json", "w", encoding="utf-8") as f:
         json.dump({**final_config, "cv_seconds": round(cv_s, 2), "final_train_seconds": round(final_s, 3),
-                   "cv_mean": {m: round(float(v), 4) for m, v in zip(METRIC_NAMES, mean)}}, f, indent=2)
+                   "cv_mean": {m: round(float(v), 4) for m, v in zip(metric_names(n_classes), mean)}}, f, indent=2)
 
     logger.info("Results:\n\n" + summary + "\n")
     logger.info(f"Final model trained in {final_s:.2f}s -> {output_dir / 'm1_final.pt'} | "

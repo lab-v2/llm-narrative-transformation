@@ -48,7 +48,7 @@ import torch
 from sklearn.cluster import KMeans
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 
-from train_m1 import (FP_IGNORE, METRIC_NAMES, N_CLASSES, REPO_ROOT, SEED, load_data, predict_proba,
+from train_m1 import (FP_IGNORE, N_CLASSES, metric_names, REPO_ROOT, SEED, load_data, predict_proba,
                       setup_file_logging, train, write_cv_outputs)
 
 logger = logging.getLogger(__name__)
@@ -64,16 +64,17 @@ def unit(X: np.ndarray) -> np.ndarray:
     return X / np.linalg.norm(X, axis=-1, keepdims=True)
 
 
-def build_prototypes(X: np.ndarray, Y: np.ndarray, k: int, seed: int, normalize: bool = True):
+def build_prototypes(X: np.ndarray, Y: np.ndarray, k: int, seed: int, normalize: bool = True,
+                     n_classes: int = N_CLASSES):
     """Up to k k-means centroids per (question, rating) from the stories with that rating.
     X: (N, D) shared by all questions, or (Q, N, D) per question (M3's encodings).
     Returns prototypes (Q, C*k, D) (unit length if normalize) and a mask (Q, C*k) of slots that have one."""
     N, Q = Y.shape
-    P = np.zeros((Q, N_CLASSES * k, X.shape[-1]), dtype=np.float32)
-    mask = np.zeros((Q, N_CLASSES * k), dtype=bool)
+    P = np.zeros((Q, n_classes * k, X.shape[-1]), dtype=np.float32)
+    mask = np.zeros((Q, n_classes * k), dtype=bool)
     for q in range(Q):
         Xq = X[q] if X.ndim == 3 else X
-        for r in range(N_CLASSES):
+        for r in range(n_classes):
             members = Xq[Y[:, q] == r]
             if len(members) == 0:
                 continue
@@ -112,12 +113,13 @@ def distances(X: np.ndarray, P: np.ndarray, mask: np.ndarray, k: int, metric: st
     return d
 
 
-def crossfit_distances(X: np.ndarray, Y: np.ndarray, groups: np.ndarray, k: int, inner_folds: int, seed: int):
+def crossfit_distances(X: np.ndarray, Y: np.ndarray, groups: np.ndarray, k: int, inner_folds: int, seed: int,
+                       n_classes: int = N_CLASSES):
     """Distances for training stories, each from prototypes built without it (inner folds)."""
-    F = np.zeros((Y.shape[1], len(X), N_CLASSES * k), dtype=np.float32)
+    F = np.zeros((Y.shape[1], len(X), n_classes * k), dtype=np.float32)
     inner = StratifiedKFold(n_splits=inner_folds, shuffle=True, random_state=seed)
     for fit_idx, out_idx in inner.split(X, groups):
-        P, mask = build_prototypes(X[fit_idx], Y[fit_idx], k, seed)
+        P, mask = build_prototypes(X[fit_idx], Y[fit_idx], k, seed, n_classes=n_classes)
         F[:, out_idx] = distances(X[out_idx], P, mask, k)
     return F
 
@@ -133,8 +135,9 @@ def fit_scaler(F: np.ndarray):
 def fit_features(X: np.ndarray, Y: np.ndarray, groups: np.ndarray, args, seed: int):
     """Everything M2 learns from the training stories before the networks:
     cross-fitted training features, prototypes from all of them, and the scaler."""
-    F_train = crossfit_distances(X, Y, groups, args.k_per_rating, args.inner_folds, seed)
-    P, mask = build_prototypes(X, Y, args.k_per_rating, seed)
+    n = getattr(args, "n_classes", N_CLASSES)
+    F_train = crossfit_distances(X, Y, groups, args.k_per_rating, args.inner_folds, seed, n_classes=n)
+    P, mask = build_prototypes(X, Y, args.k_per_rating, seed, n_classes=n)
     mean, std = fit_scaler(F_train)
     return (F_train - mean) / std, P, mask, mean, std
 
@@ -178,6 +181,7 @@ def main():
     data = load_data(Path(args.embeddings_dir), Path(args.survey_dir), Path(args.split_csv))
     X, Y, groups = data["X"], data["Y"], data["groups"]
     N, Q = Y.shape
+    args.n_classes = data["n_classes"]
     hidden_str = "-".join(map(str, args.hidden)) or "none"
     setting = (f"k_per_rating={args.k_per_rating} inner_folds={args.inner_folds} hidden={hidden_str} "
                f"dropout={args.dropout} weight_decay={args.weight_decay} steps={args.steps} lr={args.lr} "
@@ -185,18 +189,18 @@ def main():
     group_counts = {str(g): int(n) for g, n in zip(*np.unique(groups, return_counts=True))}
     logger.info(f"{N} stories ({group_counts}), {Q} questions, "
                 f"embeddings {data['embedding_model']} ({X.shape[1]} dims)")
-    logger.info(f"Setting: {setting} | {N_CLASSES * args.k_per_rating} features per question | "
+    logger.info(f"Setting: {setting} | {args.n_classes * args.k_per_rating} features per question | "
                 f"{args.repeats}x{args.folds}-fold CV")
 
     # ---------- Cross-validation ----------
-    oof = np.zeros((args.repeats, Q, N, N_CLASSES), dtype=np.float32)
+    oof = np.zeros((args.repeats, Q, N, args.n_classes), dtype=np.float32)
     cv = RepeatedStratifiedKFold(n_splits=args.folds, n_repeats=args.repeats, random_state=SEED)
     cv_start = time.perf_counter()
     for fold_i, (tr, va) in enumerate(cv.split(X, groups)):
         fold_start = time.perf_counter()
         Z_tr, P, mask, mean, std = fit_features(X[tr], Y[tr], groups[tr], args, seed=SEED + fold_i)
         Z_va = (distances(X[va], P, mask, args.k_per_rating) - mean) / std
-        model = train(Z_tr, Y[tr], args, seed=SEED + fold_i)
+        model = train(Z_tr, Y[tr], args, seed=SEED + fold_i, n_classes=args.n_classes)
         oof[fold_i // args.folds][:, va] = predict_proba(model, Z_va)
         logger.info(f"[fold {fold_i + 1}/{args.repeats * args.folds}] {time.perf_counter() - fold_start:.1f}s")
     cv_s = time.perf_counter() - cv_start
@@ -208,7 +212,7 @@ def main():
     # ---------- Final model on all train stories ----------
     final_start = time.perf_counter()
     Z, P, mask, mean, std = fit_features(X, Y, groups, args, seed=SEED)
-    model = train(Z, Y, args, seed=SEED)
+    model = train(Z, Y, args, seed=SEED, n_classes=args.n_classes)
     final_s = time.perf_counter() - final_start
 
     final_config = {
@@ -217,7 +221,8 @@ def main():
         "hidden": list(args.hidden), "dropout": args.dropout,
         "weight_decay": args.weight_decay, "steps": args.steps, "lr": args.lr,
         "loss": args.loss, "decode": args.decode,
-        "n_classes": N_CLASSES, "question_ids": data["question_ids"], "components": data["components"],
+        "n_classes": args.n_classes, "answer_values": data["answer_values"], "answer_scale": data["answer_scale"],
+        "question_ids": data["question_ids"], "components": data["components"],
         "embedding_model": data["embedding_model"], "embedding_dim": int(X.shape[1]),
         "train_stories": data["names"], "seed": SEED,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
@@ -232,7 +237,7 @@ def main():
     }, output_dir / "m2_final.pt")
     with open(output_dir / "m2_final_config.json", "w", encoding="utf-8") as f:
         json.dump({**final_config, "cv_seconds": round(cv_s, 2), "final_train_seconds": round(final_s, 3),
-                   "cv_mean": {m: round(float(v), 4) for m, v in zip(METRIC_NAMES, cv_mean)}}, f, indent=2)
+                   "cv_mean": {m: round(float(v), 4) for m, v in zip(metric_names(args.n_classes), cv_mean)}}, f, indent=2)
 
     logger.info("Results:\n\n" + summary + "\n")
     logger.info(f"Final model trained in {final_s:.2f}s -> {output_dir / 'm2_final.pt'} | "

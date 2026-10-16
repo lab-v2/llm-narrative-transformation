@@ -24,12 +24,19 @@ def main():
     parser = argparse.ArgumentParser(description="Build the results dashboard from evaluate.py's summary.json")
     parser.add_argument("--summary", type=str, required=True, help="summary.json written by evaluate.py")
     parser.add_argument("--output", type=str, required=True, help="Where to write the dashboard .html")
+    parser.add_argument("--hide", type=str, nargs="*", default=[],
+                        choices=["kappa", "agreement", "scores", "speed", "questions", "confusion", "groups", "stories"],
+                        help="Parts to leave out, e.g. a short version for sharing: "
+                             "--hide kappa agreement scores questions groups stories")
     args = parser.parse_args()
 
     with open(args.summary, encoding="utf-8") as f:
         data = json.load(f)
+    data["hide"] = args.hide
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")  # safe inside <script>
     html = TEMPLATE.read_text(encoding="utf-8").replace("__DATA__", payload, 1)
+    if data.get("n_classes") == 2:  # yes/no survey: its own name, so the two dashboards are easy to tell apart
+        html = html.replace("LLM-Free Survey Scorecard", "LLM-Free Yes/No Scorecard")
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

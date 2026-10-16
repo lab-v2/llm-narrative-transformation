@@ -46,7 +46,7 @@ import numpy as np
 import torch
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 
-from train_m1 import (METRIC_NAMES, N_CLASSES, REPO_ROOT, SEED, PerQuestionMLP, fit_features as fit_pca,
+from train_m1 import (N_CLASSES, metric_names, REPO_ROOT, SEED, PerQuestionMLP, fit_features as fit_pca,
                       load_data, predict_proba, question_metrics, setup_file_logging, to_features, train,
                       write_cv_outputs)
 from train_m2 import build_prototypes, distances, fit_scaler
@@ -63,7 +63,7 @@ def fit_encoder(X: np.ndarray, Y: np.ndarray, args, seed: int):
     enc_args = SimpleNamespace(hidden=args.enc_hidden, dropout=args.enc_dropout, lr=args.enc_lr,
                                weight_decay=args.enc_weight_decay, steps=args.enc_steps, loss=args.enc_loss)
     pca, scaler = fit_pca(X, args.enc_pca_k)
-    model = train(to_features(pca, scaler, X), Y, enc_args, seed=seed)
+    model = train(to_features(pca, scaler, X), Y, enc_args, seed=seed, n_classes=getattr(args, "n_classes", N_CLASSES))
     return pca, scaler, model
 
 
@@ -88,12 +88,12 @@ def encode(encoder, X: np.ndarray) -> np.ndarray:
 
 def crossfit_distances(X: np.ndarray, Y: np.ndarray, groups: np.ndarray, args, seed: int) -> np.ndarray:
     """Distances for training stories, each from an encoder + prototypes built without it (inner folds)."""
-    k = args.k_per_rating
-    F = np.zeros((Y.shape[1], len(X), N_CLASSES * k), dtype=np.float32)
+    k, n = args.k_per_rating, getattr(args, "n_classes", N_CLASSES)
+    F = np.zeros((Y.shape[1], len(X), n * k), dtype=np.float32)
     inner = StratifiedKFold(n_splits=args.inner_folds, shuffle=True, random_state=seed)
     for fit_idx, out_idx in inner.split(X, groups):
         encoder = fit_encoder(X[fit_idx], Y[fit_idx], args, seed)
-        P, mask = build_prototypes(encode(encoder, X[fit_idx]), Y[fit_idx], k, seed, normalize=False)
+        P, mask = build_prototypes(encode(encoder, X[fit_idx]), Y[fit_idx], k, seed, normalize=False, n_classes=n)
         F[:, out_idx] = distances(encode(encoder, X[out_idx]), P, mask, k, metric="euclidean")
     return F
 
@@ -103,17 +103,18 @@ def fit_features(X: np.ndarray, Y: np.ndarray, groups: np.ndarray, args, seed: i
     and prototypes from all training stories, and the scaler."""
     F_train = crossfit_distances(X, Y, groups, args, seed)
     encoder = fit_encoder(X, Y, args, seed)
-    P, mask = build_prototypes(encode(encoder, X), Y, args.k_per_rating, seed, normalize=False)
+    P, mask = build_prototypes(encode(encoder, X), Y, args.k_per_rating, seed, normalize=False,
+                               n_classes=getattr(args, "n_classes", N_CLASSES))
     mean, std = fit_scaler(F_train)
     return (F_train - mean) / std, encoder, P, mask, mean, std
 
 
-def nearest_prototype_probs(D: np.ndarray, mask: np.ndarray, k: int) -> np.ndarray:
+def nearest_prototype_probs(D: np.ndarray, mask: np.ndarray, k: int, n_classes: int = N_CLASSES) -> np.ndarray:
     """Rating of the nearest prototype, as one-hot probabilities. D (Q, N, C*k) sorted per rating."""
     Q, N, S = D.shape
-    nearest = D.reshape(Q, N, N_CLASSES, k)[..., 0]                              # (Q, N, C)
-    nearest = np.where(mask.reshape(Q, N_CLASSES, k)[:, None, :, 0], nearest, np.inf)
-    return np.eye(N_CLASSES, dtype=np.float32)[nearest.argmin(-1)]
+    nearest = D.reshape(Q, N, n_classes, k)[..., 0]                              # (Q, N, C)
+    nearest = np.where(mask.reshape(Q, n_classes, k)[:, None, :, 0], nearest, np.inf)
+    return np.eye(n_classes, dtype=np.float32)[nearest.argmin(-1)]
 
 
 # ==========================================================
@@ -178,7 +179,8 @@ def main():
     logger.info(f"Setting: {setting} | {args.repeats}x{args.folds}-fold CV")
 
     # ---------- Cross-validation ----------
-    oof = np.zeros((args.repeats, Q, N, N_CLASSES), dtype=np.float32)
+    args.n_classes = data["n_classes"]
+    oof = np.zeros((args.repeats, Q, N, args.n_classes), dtype=np.float32)
     oof_nearest = np.zeros_like(oof)
     cv = RepeatedStratifiedKFold(n_splits=args.folds, n_repeats=args.repeats, random_state=SEED)
     cv_start = time.perf_counter()
@@ -186,28 +188,32 @@ def main():
         fold_start = time.perf_counter()
         Z_tr, encoder, P, mask, mean, std = fit_features(X[tr], Y[tr], groups[tr], args, seed=SEED + fold_i)
         D_va = distances(encode(encoder, X[va]), P, mask, k, metric="euclidean")
-        model = train(Z_tr, Y[tr], args, seed=SEED + fold_i)
+        model = train(Z_tr, Y[tr], args, seed=SEED + fold_i, n_classes=args.n_classes)
         repeat = fold_i // args.folds
         oof[repeat][:, va] = predict_proba(model, (D_va - mean) / std)
-        oof_nearest[repeat][:, va] = nearest_prototype_probs(D_va, mask, k)
+        oof_nearest[repeat][:, va] = nearest_prototype_probs(D_va, mask, k, args.n_classes)
         logger.info(f"[fold {fold_i + 1}/{args.repeats * args.folds}] {time.perf_counter() - fold_start:.1f}s")
     cv_s = time.perf_counter() - cv_start
     logger.info(f"CV done: {args.repeats * args.folds} fold runs in {cv_s:.1f}s")
 
     cv_mean, summary = write_cv_outputs(output_dir, data, oof, "M3 per-question MLP on prototype distances "
                                         "in M1's tuned space", setting, args.folds, args.repeats, cv_s, args.decode)
-    nearest_mean = np.mean([[question_metrics(Y[:, q], oof_nearest[r, q].argmax(-1)) for q in range(Q)]
-                            for r in range(args.repeats)], axis=(0, 1))
-    nearest_line = (f"Nearest prototype (no head), same CV: QWK={nearest_mean[0]:.3f}  "
-                    f"balanced_acc={nearest_mean[1]:.3f}  exact={nearest_mean[2]:.3f}  within1={nearest_mean[3]:.3f}  "
-                    f"QWK3={nearest_mean[4]:.3f}")
+    nearest_mean = np.nanmean([[question_metrics(Y[:, q], oof_nearest[r, q].argmax(-1), args.n_classes, oof_nearest[r, q])
+                                for q in range(Q)] for r in range(args.repeats)], axis=(0, 1))
+    if args.n_classes == 2:
+        nearest_line = (f"Nearest prototype (no head), same CV: kappa={nearest_mean[0]:.3f}  "
+                        f"balanced_acc={nearest_mean[1]:.3f}  accuracy={nearest_mean[2]:.3f}  F1(yes)={nearest_mean[3]:.3f}")
+    else:
+        nearest_line = (f"Nearest prototype (no head), same CV: QWK={nearest_mean[0]:.3f}  "
+                        f"balanced_acc={nearest_mean[1]:.3f}  exact={nearest_mean[2]:.3f}  within1={nearest_mean[3]:.3f}  "
+                        f"QWK3={nearest_mean[4]:.3f}")
     with open(output_dir / "cv_report.txt", "a", encoding="utf-8") as f:
         f.write("\n" + nearest_line + "\n")
 
     # ---------- Final model on all train stories ----------
     final_start = time.perf_counter()
     Z, encoder, P, mask, mean, std = fit_features(X, Y, groups, args, seed=SEED)
-    model = train(Z, Y, args, seed=SEED)
+    model = train(Z, Y, args, seed=SEED, n_classes=args.n_classes)
     final_s = time.perf_counter() - final_start
     pca, scaler, enc_model = encoder
 
@@ -220,7 +226,8 @@ def main():
         "hidden": list(args.hidden), "dropout": args.dropout,
         "weight_decay": args.weight_decay, "steps": args.steps, "lr": args.lr,
         "loss": args.loss, "decode": args.decode,
-        "n_classes": N_CLASSES, "question_ids": data["question_ids"], "components": data["components"],
+        "n_classes": args.n_classes, "answer_values": data["answer_values"], "answer_scale": data["answer_scale"],
+        "question_ids": data["question_ids"], "components": data["components"],
         "embedding_model": data["embedding_model"], "embedding_dim": int(X.shape[1]),
         "train_stories": data["names"], "seed": SEED,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
@@ -240,8 +247,9 @@ def main():
     }, output_dir / "m3_final.pt")
     with open(output_dir / "m3_final_config.json", "w", encoding="utf-8") as f:
         json.dump({**final_config, "cv_seconds": round(cv_s, 2), "final_train_seconds": round(final_s, 3),
-                   "cv_mean": {m: round(float(v), 4) for m, v in zip(METRIC_NAMES, cv_mean)},
-                   "cv_mean_nearest_prototype": {m: round(float(v), 4) for m, v in zip(METRIC_NAMES, nearest_mean)}},
+                   "cv_mean": {m: round(float(v), 4) for m, v in zip(metric_names(args.n_classes), cv_mean)},
+                   "cv_mean_nearest_prototype": {m: round(float(v), 4)
+                                                 for m, v in zip(metric_names(args.n_classes), nearest_mean)}},
                   f, indent=2)
 
     logger.info("Results:\n\n" + summary + "\n\n" + nearest_line + "\n")

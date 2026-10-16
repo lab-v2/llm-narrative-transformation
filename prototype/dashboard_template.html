@@ -53,6 +53,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { background: var(--page); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.5; }
 .wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 56px; display: flex; flex-direction: column; gap: 22px; }
 h1, h2, h3 { text-wrap: balance; margin: 0; }
@@ -66,7 +67,7 @@ p { margin: 0; }
 .mono { font-family: var(--mono); font-size: 12px; }
 header { display: flex; flex-direction: column; gap: 8px; }
 
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(var(--tile-cols, 4), minmax(0, 1fr)); gap: 12px; }
 .tile { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .tile .label { color: var(--ink-2); font-size: 12.5px; }
 .tile .value { font-size: 30px; font-weight: 650; line-height: 1.2; }
@@ -149,7 +150,7 @@ label.ctl select { flex: 1 1 auto; min-width: 0; width: 100%; text-overflow: ell
 footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 4px; max-width: 90ch; }
 
 @media (max-width: 860px) {
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tiles { grid-template-columns: repeat(min(2, var(--tile-cols, 4)), minmax(0, 1fr)); }
   .grid2 { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 440px) {
@@ -170,18 +171,18 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
 
   <section class="tiles" id="tiles" aria-label="Headline numbers"></section>
 
-  <section class="grid2">
+  <section class="grid2" id="agree-row" data-section="agreement">
     <div class="card">
       <div class="card-head">
         <div>
           <h2>Agreement with the LLM survey</h2>
-          <p class="note">Mean quadratic weighted kappa (QWK) over the 20 questions. 0 = chance, 1 = identical to the LLM.</p>
+          <p class="note" id="ci-note">Mean quadratic weighted kappa (QWK) over the 20 questions. 0 = chance, 1 = identical to the LLM.</p>
         </div>
       </div>
       <div class="legend" id="ci-legend"></div>
       <div class="chart" id="ci-chart"></div>
     </div>
-    <div class="card">
+    <div class="card" id="diff-card">
       <div class="card-head">
         <div>
           <h2 id="diff-title">Difference from the reference model</h2>
@@ -192,13 +193,13 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" data-section="scores">
     <div class="card-head"><div><h2>All accuracy scores</h2>
-      <p class="note">Balanced accuracy: about 0.20–0.25 for always predicting one rating. 3-level groups ratings as 1–2 / 3 / 4–5.</p></div></div>
+      <p class="note" id="acc-note">Balanced accuracy: about 0.20–0.25 for always predicting one rating. 3-level groups ratings as 1–2 / 3 / 4–5.</p></div></div>
     <div class="scroll"><table id="acc-table"></table></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-section="speed">
     <div class="card-head">
       <div>
         <h2>Time and cost per story</h2>
@@ -209,11 +210,11 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     <div class="scroll"><table id="speed-table"></table></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-section="questions">
     <div class="card-head">
       <div>
         <h2>Agreement by question</h2>
-        <p class="note">QWK per question. Click a row to open its confusion matrices below.</p>
+        <p class="note" id="heat-note">QWK per question. Click a row to open its confusion matrices below.</p>
       </div>
       <div class="controls">
         <label class="ctl" for="heat-sort">Sort
@@ -225,11 +226,11 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     <div class="scroll"><table class="heat" id="heat-table"></table></div>
   </section>
 
-  <section class="card" id="cm-card">
+  <section class="card" id="cm-card" data-section="confusion">
     <div class="card-head">
       <div>
         <h2>Confusion matrices</h2>
-        <p class="note">Rows: the LLM's rating. Columns: the model's prediction. Outlined cells on the diagonal are exact matches.</p>
+        <p class="note" id="cm-note">Rows: the LLM's rating. Columns: the model's prediction. Outlined cells on the diagonal are exact matches.</p>
       </div>
       <div class="controls">
         <label class="ctl" for="cm-question">Question
@@ -240,7 +241,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     <div class="cms" id="cms"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-section="groups">
     <div class="card-head">
       <div>
         <h2>By story type</h2>
@@ -250,7 +251,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     <div class="grid2" id="group-charts"></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-section="stories">
     <div class="card-head">
       <div>
         <h2>Story explorer</h2>
@@ -281,6 +282,14 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
   const D = JSON.parse(document.getElementById("dashboard-data").textContent);
   const M = D.models;
   const Q = D.question_ids.length;
+  const BIN = D.n_classes === 2;                                   // yes/no survey instead of 1-5 ratings
+  const VALS = D.answer_values || [1, 2, 3, 4, 5];
+  const NC = VALS.length;
+  const LBL = (v) => (BIN ? (v === 1 ? "Yes" : "No") : String(v));  // how an answer value is shown
+  const QL = BIN ? "kappa" : "QWK";                                 // name of the main agreement score
+  const HIDE = new Set(D.hide || []);   // sections left out of this version of the page (make_dashboard.py --hide)
+  document.querySelectorAll("[data-section]").forEach((sec) => { sec.hidden = HIDE.has(sec.dataset.section); });
+  const LABEL_W = Math.max(108, Math.ceil(30 + 7.2 * Math.max(10, ...M.map((m) => m.length))));  // chart row-label column
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const color = (m) => `var(--s${M.indexOf(m) + 1})`;   // for HTML styles
   const colorVal = (m) => css(`--s${M.indexOf(m) + 1}`);  // resolved value, for SVG attributes
@@ -334,19 +343,30 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
 
   // ---------- header + tiles ----------
   const groupText = groups.map((g) => `${groupN[g]} ${g}`).join(", ");
+  if (BIN) {
+    document.getElementById("eyebrow").textContent = "LLM-free survey prototype · test set · yes/no answers";
+    document.getElementById("ci-note").textContent = "Mean Cohen's kappa over the 20 yes/no questions. 0 = chance, 1 = identical to the LLM.";
+    document.getElementById("acc-note").textContent = "Balanced accuracy and AUC: 0.5 = chance. F1 (yes) shows how well a model finds the LLM's yes answers.";
+    document.getElementById("heat-note").textContent = "Kappa per question. Click a row to open its confusion matrices below.";
+    document.getElementById("cm-note").textContent = "Rows: the LLM's answer. Columns: the model's answer. Outlined cells are matches.";
+  }
   document.getElementById("lede").textContent =
-    `Can a small model on OpenAI embeddings replace the 20-question ${D.llm_model} survey? ` +
-    `${D.n_stories} held-out stories (${groupText}), each model's ratings compared question by question with the LLM's.`;
+    (BIN ? `Can a small model on OpenAI embeddings replace the ${D.llm_model} survey's 20 yes/no answers? `
+         : `Can a small model on OpenAI embeddings replace the 20-question ${D.llm_model} survey? `) +
+    `${D.n_stories} held-out stories (${groupText}), ${M.length === 1 ? "the model's answers" : "each model's ratings"} compared question by question with the LLM's.`;
 
   function renderTiles() {
     const t = timingOf[best];
     const tiles = [
-      { label: `Best agreement (${best})`, value: fmt(overall[best].qwk), sub: `QWK · 95% range ${fmt(overall[best].qwk_ci_low, 2)}–${fmt(overall[best].qwk_ci_high, 2)}` },
-      { label: "Within ±1 of the LLM", value: Math.round(overall[best].within1_acc * 100) + "%", sub: `${best}, all questions · exact ${Math.round(overall[best].exact_acc * 100)}%` },
+      { label: `Best agreement (${best})`, value: fmt(overall[best].qwk), sub: `${QL} · 95% range ${fmt(overall[best].qwk_ci_low, 2)}–${fmt(overall[best].qwk_ci_high, 2)}` },
+      BIN ? { label: "Same answer as the LLM", value: Math.round(overall[best].exact_acc * 100) + "%", sub: `${best}, all questions · F1 (yes) ${fmt(overall[best].f1_yes, 2)} · AUC ${fmt(overall[best].auc, 2)}` }
+          : { label: "Within ±1 of the LLM", value: Math.round(overall[best].within1_acc * 100) + "%", sub: `${best}, all questions · exact ${Math.round(overall[best].exact_acc * 100)}%` },
       { label: "Faster than the LLM survey", value: t.speedup_vs_llm.toFixed(1) + "×", sub: `${t.mean_s.toFixed(2)} s vs ${llmRow.mean_s.toFixed(2)} s per story` },
       { label: "Cheaper than the LLM survey", value: t.cost_per_story_usd > 0 ? Math.round(llmRow.cost_per_story_usd / t.cost_per_story_usd) + "×" : "–", sub: `$${t.cost_per_story_usd.toFixed(5)} vs $${llmRow.cost_per_story_usd.toFixed(4)} per story` },
     ];
+    if (HIDE.has("kappa")) tiles.shift();      // the agreement (kappa / QWK) tile
     const box = document.getElementById("tiles");
+    box.style.setProperty("--tile-cols", tiles.length);
     box.replaceChildren(...tiles.map((x) => {
       const d = el("div", { class: "tile" });
       d.append(el("span", { class: "label" }, x.label), el("span", { class: "value" }, x.value), el("span", { class: "sub" }, x.sub));
@@ -376,18 +396,18 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
   // ---------- agreement (CI) chart ----------
   function renderCI() {
     const box = document.getElementById("ci-chart");
-    const W = Math.max(300, box.clientWidth), rowH = 40, top = 8, labelW = 108, rightW = 54;
+    const W = Math.max(300, box.clientWidth), rowH = 40, top = 8, labelW = LABEL_W, rightW = 54;
     const H = top + M.length * rowH + 26;
     const lo = Math.min(0, ...M.map((m) => Math.min(overall[m].qwk_ci_low, overall[m].cv_qwk ?? 1))) - 0.02;
     const domLo = Math.floor(lo * 10) / 10, domHi = 1;
     const x = (v) => labelW + ((v - domLo) / (domHi - domLo)) * (W - labelW - rightW);
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Test QWK per model with 95% range and cross-validation QWK" });
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Test ${QL} per model with 95% range and cross-validation ${QL}` });
     axis(svg, x, niceTicks(domLo, domHi, 0.2), top, top + M.length * rowH, (v) => v.toFixed(1));
     M.forEach((m, i) => {
       const y = top + i * rowH + rowH / 2, o = overall[m];
       rowLabel(svg, 0, y, m, colorVal(m));
       const g = svgEl("g", { class: "hit", tabindex: 0,
-        "data-tip": `${fmt(o.qwk)} test QWK\n${m} · 95% range ${fmt(o.qwk_ci_low)}–${fmt(o.qwk_ci_high)}\ncross-validation QWK ${fmt(o.cv_qwk)}` });
+        "data-tip": `${fmt(o.qwk)} test ${QL}\n${m} · 95% range ${fmt(o.qwk_ci_low)}–${fmt(o.qwk_ci_high)}\ncross-validation ${QL} ${fmt(o.cv_qwk)}` });
       g.appendChild(svgEl("rect", { x: labelW - 6, y: y - rowH / 2, width: W - labelW + 6, height: rowH, fill: "transparent" }));
       g.appendChild(svgEl("line", { class: "mark", x1: x(o.qwk_ci_low), x2: x(o.qwk_ci_high), y1: y, y2: y, stroke: colorVal(m), "stroke-width": 2, "stroke-linecap": "round" }));
       if (o.cv_qwk !== null && o.cv_qwk !== undefined)
@@ -399,8 +419,8 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     box.replaceChildren(svg);
     const lg = document.getElementById("ci-legend");
     lg.replaceChildren();
-    const a = el("span"); a.append(el("i", { class: "key-dot", style: `background:${css("--ink-2")}` }), document.createTextNode("Test QWK, line = 95% range"));
-    const b = el("span"); b.append(el("i", { class: "key-tick" }), document.createTextNode("Cross-validation QWK on train"));
+    const a = el("span"); a.append(el("i", { class: "key-dot", style: `background:${css("--ink-2")}` }), document.createTextNode(`Test ${QL}, line = 95% range`));
+    const b = el("span"); b.append(el("i", { class: "key-tick" }), document.createTextNode(`Cross-validation ${QL} on train`));
     lg.append(a, b);
   }
 
@@ -409,14 +429,18 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     const box = document.getElementById("diff-chart");
     const others = M.filter((m) => m !== D.reference_model);
     document.getElementById("diff-title").textContent = `Difference from ${D.reference_model}`;
-    if (!others.length) { box.replaceChildren(el("p", { class: "note" }, "Only one model was evaluated.")); return; }
-    const W = Math.max(280, box.clientWidth), rowH = 52, top = 8, labelW = 108, rightW = 8;
+    if (!others.length) {   // a single model: no comparison panel, agreement chart takes the full row
+      document.getElementById("diff-card").hidden = true;
+      document.getElementById("agree-row").style.gridTemplateColumns = "minmax(0, 1fr)";
+      return;
+    }
+    const W = Math.max(280, box.clientWidth), rowH = 52, top = 8, labelW = LABEL_W, rightW = 8;
     const H = top + others.length * rowH + 26;
     const ext = Math.max(0.1, ...others.map((m) => Math.max(Math.abs(D.diffs[m].low), Math.abs(D.diffs[m].high)))) * 1.15;
     const step = ext > 0.4 ? 0.2 : 0.1;
     const domHi = Math.ceil(ext / step) * step, domLo = -domHi;
     const x = (v) => labelW + ((v - domLo) / (domHi - domLo)) * (W - labelW - rightW);
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `QWK difference from ${D.reference_model} with 95% range` });
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${QL} difference from ${D.reference_model} with 95% range` });
     axis(svg, x, niceTicks(domLo, domHi, step), top, top + others.length * rowH, (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(1));
     others.forEach((m, i) => {
       const y = top + i * rowH + rowH / 2 - 6, d = D.diffs[m];
@@ -424,7 +448,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
       rowLabel(svg, 0, y, m, colorVal(m));
       svg.appendChild(svgEl("text", { x: 16, y: y + 19, "font-size": 11, fill: css("--muted") }, real ? "real difference" : "could be chance"));
       const g = svgEl("g", { class: "hit", tabindex: 0,
-        "data-tip": `${sgn(d.diff)} QWK vs ${D.reference_model}\n${m} · 95% range ${sgn(d.low)} to ${sgn(d.high)}\n${real ? "Range excludes 0: a real difference" : "Range includes 0: could be chance"}` });
+        "data-tip": `${sgn(d.diff)} ${QL} vs ${D.reference_model}\n${m} · 95% range ${sgn(d.low)} to ${sgn(d.high)}\n${real ? "Range excludes 0: a real difference" : "Range includes 0: could be chance"}` });
       g.appendChild(svgEl("rect", { x: labelW - 6, y: y - rowH / 2 + 6, width: W - labelW + 6, height: rowH, fill: "transparent" }));
       g.appendChild(svgEl("line", { class: "mark", x1: x(d.low), x2: x(d.high), y1: y, y2: y, stroke: colorVal(m), "stroke-width": 2, "stroke-linecap": "round" }));
       g.appendChild(svgEl("circle", { class: "mark", cx: x(d.diff), cy: y, r: 5.5, fill: colorVal(m), stroke: css("--surface"), "stroke-width": 2 }));
@@ -438,7 +462,8 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
   // ---------- accuracy table ----------
   function renderAccTable() {
     const t = document.getElementById("acc-table");
-    const head = ["Model", "Test QWK", "95% range", "CV QWK", "Balanced acc.", "Exact", "Within ±1", "QWK, 3-level", "Balanced acc., 3-level"];
+    const head = BIN ? ["Model", "Test kappa", "95% range", "CV kappa", "Balanced acc.", "Accuracy", "F1 (yes)", "AUC"]
+                     : ["Model", "Test QWK", "95% range", "CV QWK", "Balanced acc.", "Exact", "Within ±1", "QWK, 3-level", "Balanced acc., 3-level"];
     const thead = el("thead"), tr = el("tr");
     head.forEach((h) => tr.appendChild(el("th", {}, h)));
     thead.appendChild(tr);
@@ -447,8 +472,10 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
       const o = overall[m], r = el("tr"), c = el("td");
       c.append(el("i", { class: "key-dot", style: `background:${color(m)};margin-right:8px` }), document.createTextNode(m));
       r.appendChild(c);
-      [fmt(o.qwk), `${fmt(o.qwk_ci_low)}–${fmt(o.qwk_ci_high)}`, fmt(o.cv_qwk), fmt(o.balanced_acc), fmt(o.exact_acc),
-       fmt(o.within1_acc), fmt(o.qwk_3level), fmt(o.balanced_acc_3level)].forEach((v) => r.appendChild(el("td", {}, v)));
+      (BIN ? [fmt(o.qwk), `${fmt(o.qwk_ci_low)}–${fmt(o.qwk_ci_high)}`, fmt(o.cv_qwk), fmt(o.balanced_acc), fmt(o.exact_acc),
+              fmt(o.f1_yes), fmt(o.auc)]
+           : [fmt(o.qwk), `${fmt(o.qwk_ci_low)}–${fmt(o.qwk_ci_high)}`, fmt(o.cv_qwk), fmt(o.balanced_acc), fmt(o.exact_acc),
+              fmt(o.within1_acc), fmt(o.qwk_3level), fmt(o.balanced_acc_3level)]).forEach((v) => r.appendChild(el("td", {}, v)));
       tbody.appendChild(r);
     });
     t.replaceChildren(thead, tbody);
@@ -459,7 +486,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     const box = document.getElementById("speed-chart");
     const rows = [{ name: "LLM survey", r: llmRow, col: "var(--llm)", colVal: css("--llm") },
                   ...M.map((m) => ({ name: m, r: timingOf[m], col: color(m), colVal: colorVal(m) }))];
-    const W = Math.max(300, box.clientWidth), rowH = 34, top = 6, labelW = 108, rightW = 64, barH = 18;
+    const W = Math.max(300, box.clientWidth), rowH = 34, top = 6, labelW = LABEL_W, rightW = 64, barH = 18;
     const H = top + rows.length * rowH + 26;
     const maxV = Math.max(...rows.map((d) => d.r.mean_s));
     const step = maxV > 4 ? 1 : 0.5;
@@ -515,20 +542,20 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     return 0.2126 * lum(r) + 0.7152 * lum(g) + 0.0722 * lum(b) > 0.3 ? "#0b0b0b" : "#ffffff";
   }
   const sortSel = document.getElementById("heat-sort");
-  sortSel.append(el("option", { value: "q" }, "Question order"), ...M.map((m) => el("option", { value: m }, `${m} QWK, high to low`)));
+  sortSel.append(el("option", { value: "q" }, "Question order"), ...M.map((m) => el("option", { value: m }, `${m} ${QL}, high to low`)));
   sortSel.addEventListener("change", renderHeat);
   function renderHeat() {
     const scale = document.getElementById("heat-scale");
     scale.replaceChildren(el("span", {}, "worse than chance"));
     QWK_BINS.forEach(([lo, hi, tok]) => scale.appendChild(el("i", {
-      style: `background:var(${tok})`, "data-tip": `QWK ${lo === -Infinity ? "below " + hi : hi === Infinity ? lo + " and above" : lo + " to " + hi}` })));
+      style: `background:var(${tok})`, "data-tip": `${QL} ${lo === -Infinity ? "below " + hi : hi === Infinity ? lo + " and above" : lo + " to " + hi}` })));
     scale.appendChild(el("span", {}, "agrees with the LLM"));
 
     const order = [...Array(Q).keys()];
     if (sortSel.value !== "q") order.sort((a, b) => D.per_question[sortSel.value][b].qwk - D.per_question[sortSel.value][a].qwk);
     const t = document.getElementById("heat-table");
     const thead = el("thead"), tr = el("tr");
-    tr.append(el("th", {}, "Question"), el("th", { style: "text-align:left" }, "Component"), el("th", { style: "text-align:center" }, "LLM ratings 1–5"));
+    tr.append(el("th", {}, "Question"), el("th", { style: "text-align:left" }, "Component"), el("th", { style: "text-align:center" }, BIN ? "LLM answers no / yes" : "LLM ratings 1–5"));
     M.forEach((m) => { const th = el("th", { style: "text-align:center" }); th.append(el("i", { class: "key-dot", style: `background:${color(m)};margin-right:6px` }), document.createTextNode(m)); tr.appendChild(th); });
     thead.appendChild(tr);
     const tbody = el("tbody");
@@ -540,7 +567,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
       r.appendChild(el("td", { class: "mono" }, "q" + D.question_ids[q]));
       r.appendChild(el("td", { class: "qcomp", style: "text-align:left" }, D.components[q]));
       const counts = D.test_counts[q].split("/").map(Number), maxC = Math.max(1, ...counts);
-      const dist = el("span", { class: "dist", "data-tip": `${counts.join(" / ")}\nLLM ratings 1 / 2 / 3 / 4 / 5 on q${D.question_ids[q]}` });
+      const dist = el("span", { class: "dist", "data-tip": `${counts.join(" / ")}\nLLM ${BIN ? "answers no / yes" : "ratings 1 / 2 / 3 / 4 / 5"} on q${D.question_ids[q]}` });
       counts.forEach((c) => dist.appendChild(el("i", { style: `height:${Math.max(1, (c / maxC) * 22)}px` })));
       const dc = el("td", { style: "text-align:center" }); dc.appendChild(dist); r.appendChild(dc);
       M.forEach((m) => {
@@ -548,7 +575,8 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
         inkCache[tok] = inkCache[tok] || inkOn(tok);
         const td = el("td", { class: "cell" });
         td.appendChild(el("div", { style: `background:var(${tok});color:${inkCache[tok]}`,
-          "data-tip": `${fmt(pq.qwk)} QWK\n${m} · q${D.question_ids[q]} ${D.components[q]}\nexact ${fmt(pq.exact_acc, 2)} · within ±1 ${fmt(pq.within1_acc, 2)} · balanced acc. ${fmt(pq.balanced_acc, 2)}` }, fmt(pq.qwk, 2)));
+          "data-tip": BIN ? `${fmt(pq.qwk)} kappa\n${m} · q${D.question_ids[q]} ${D.components[q]}\naccuracy ${fmt(pq.exact_acc, 2)} · F1 (yes) ${fmt(pq.f1_yes, 2)} · AUC ${fmt(pq.auc, 2)}`
+                     : `${fmt(pq.qwk)} QWK\n${m} · q${D.question_ids[q]} ${D.components[q]}\nexact ${fmt(pq.exact_acc, 2)} · within ±1 ${fmt(pq.within1_acc, 2)} · balanced acc. ${fmt(pq.balanced_acc, 2)}` }, fmt(pq.qwk, 2)));
         r.appendChild(td);
       });
       tbody.appendChild(r);
@@ -568,7 +596,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
   }
   function matrixFor(m) {
     if (cmSel.value !== "all") return D.confusion[m][Number(cmSel.value)];
-    const tot = [...Array(5)].map(() => Array(5).fill(0));
+    const tot = [...Array(NC)].map(() => Array(NC).fill(0));
     D.confusion[m].forEach((cm) => cm.forEach((row, i) => row.forEach((v, j) => (tot[i][j] += v))));
     return tot;
   }
@@ -586,13 +614,19 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
       const card = el("div", { class: "cm" });
       const title = el("div", { class: "cm-title" });
       title.append(el("i", { class: "key-dot", style: `background:${color(m)}` }), document.createTextNode(m));
-      const stats = all ? `QWK ${fmt(overall[m].qwk)} (mean over questions) · exact ${Math.round(100 * exact / total)}% · within ±1 ${Math.round(100 * within / total)}%`
-                        : `QWK ${fmt(D.per_question[m][Number(cmSel.value)].qwk)} · exact ${exact}/${total} · within ±1 ${within}/${total}`;
-      const grid = el("div", { class: "cm-grid", role: "table", "aria-label": `${m} confusion matrix for ${qLabel}` });
+      const stats = BIN && HIDE.has("kappa")
+        ? (all ? `same answer as the LLM: ${exact} of ${total} (${Math.round(100 * exact / total)}%)` : `same answer as the LLM: ${exact} of ${total}`)
+        : BIN
+        ? (all ? `kappa ${fmt(overall[m].qwk)} (mean over questions) · same answer ${Math.round(100 * exact / total)}%`
+               : `kappa ${fmt(D.per_question[m][Number(cmSel.value)].qwk)} · same answer ${exact}/${total}`)
+        : (all ? `QWK ${fmt(overall[m].qwk)} (mean over questions) · exact ${Math.round(100 * exact / total)}% · within ±1 ${Math.round(100 * within / total)}%`
+               : `QWK ${fmt(D.per_question[m][Number(cmSel.value)].qwk)} · exact ${exact}/${total} · within ±1 ${within}/${total}`);
+      const grid = el("div", { class: "cm-grid", role: "table", "aria-label": `${m} confusion matrix for ${qLabel}`,
+        style: `grid-template-columns: ${BIN ? "34px" : "22px"} repeat(${NC}, minmax(0, 1fr))` });
       grid.appendChild(el("span", { class: "h" }));
-      for (let j = 0; j < 5; j++) grid.appendChild(el("span", { class: "h" }, String(j + 1)));
+      for (let j = 0; j < NC; j++) grid.appendChild(el("span", { class: "h" }, LBL(VALS[j])));
       cm.forEach((row, i) => {
-        grid.appendChild(el("span", { class: "h" }, String(i + 1)));
+        grid.appendChild(el("span", { class: "h" }, LBL(VALS[i])));
         row.forEach((v, j) => {
           const bin = v === 0 ? 0 : Math.min(5, 1 + Math.floor((v / maxV) * 4.999));
           const tok = `--c${bin}`;
@@ -600,11 +634,11 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
           grid.appendChild(el("span", {
             class: "c" + (i === j ? " diag" : "") + (v === 0 ? " zero" : ""), tabindex: v ? 0 : -1,
             style: `background:var(${tok});` + (v ? `color:${inkCache[tok]}` : ""),
-            "data-tip": `${v} ${all ? "answers" : v === 1 ? "story" : "stories"}\nLLM said ${i + 1}, ${m} predicted ${j + 1}${i === j ? " (exact)" : ""}` }, v ? String(v) : "·"));
+            "data-tip": `${v} ${all ? "answers" : v === 1 ? "story" : "stories"}\nLLM said ${LBL(VALS[i])}, ${m} predicted ${LBL(VALS[j])}${i === j ? (BIN ? " (match)" : " (exact)") : ""}` }, v ? String(v) : "·"));
         });
       });
       const axisRow = el("div", { class: "cm-axis" });
-      axisRow.append(el("span", {}, "rows: LLM rating"), el("span", {}, "columns: predicted"));
+      axisRow.append(el("span", {}, BIN ? "rows: LLM answer" : "rows: LLM rating"), el("span", {}, "columns: predicted"));
       card.append(title, el("div", { class: "cm-stats" }, stats), grid, axisRow);
       return card;
     }));
@@ -613,7 +647,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
   // ---------- by story type ----------
   function renderGroups() {
     document.getElementById("group-note").textContent =
-      `Mean QWK over the 20 questions within each group. ${groups.map((g) => `${g}: ${groupN[g]} stories`).join(" · ")}. Small groups give rough estimates.`;
+      `Mean ${QL} over the 20 questions within each group. ${groups.map((g) => `${g}: ${groupN[g]} stories`).join(" · ")}. Small groups give rough estimates.`;
     const box = document.getElementById("group-charts");
     box.replaceChildren(...groups.map((g) => {
       const wrap = el("div", { style: "display:flex;flex-direction:column;gap:6px;min-width:0" });
@@ -622,18 +656,19 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
       wrap.appendChild(chart);
       requestAnimationFrame(() => {
         const rows = D.by_group.filter((r) => r.group === g);
-        const W = Math.max(260, chart.clientWidth), rowH = 32, top = 4, labelW = 96, rightW = 52, barH = 16;
+        const W = Math.max(260, chart.clientWidth), rowH = 32, top = 4, labelW = LABEL_W, rightW = 52, barH = 16;
         const H = top + rows.length * rowH + 26;
         const domLo = Math.min(0, Math.floor(Math.min(...rows.map((r) => r.qwk)) * 10) / 10), domHi = 1;
         const x = (v) => labelW + ((v - domLo) / (domHi - domLo)) * (W - labelW - rightW);
-        const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `QWK per model, ${g} stories` });
+        const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${QL} per model, ${g} stories` });
         axis(svg, x, niceTicks(domLo, domHi, 0.2), top, top + rows.length * rowH, (v) => v.toFixed(1));
         rows.forEach((r, i) => {
           const y = top + i * rowH + rowH / 2;
           rowLabel(svg, 0, y, r.model, colorVal(r.model));
           const x0 = x(0), x1 = x(r.qwk), left = Math.min(x0, x1), w = Math.max(2, Math.abs(x1 - x0)), rad = Math.min(4, w / 2);
           const g2 = svgEl("g", { class: "hit", tabindex: 0,
-            "data-tip": `${fmt(r.qwk)} QWK\n${r.model} · ${g} (${r.n_stories} stories)\nexact ${fmt(r.exact_acc, 2)} · within ±1 ${fmt(r.within1_acc, 2)} · balanced acc. ${fmt(r.balanced_acc, 2)}` });
+            "data-tip": BIN ? `${fmt(r.qwk)} kappa\n${r.model} · ${g} (${r.n_stories} stories)\naccuracy ${fmt(r.exact_acc, 2)} · F1 (yes) ${fmt(r.f1_yes, 2)} · balanced acc. ${fmt(r.balanced_acc, 2)}`
+                       : `${fmt(r.qwk)} QWK\n${r.model} · ${g} (${r.n_stories} stories)\nexact ${fmt(r.exact_acc, 2)} · within ±1 ${fmt(r.within1_acc, 2)} · balanced acc. ${fmt(r.balanced_acc, 2)}` });
           g2.appendChild(svgEl("rect", { x: labelW - 6, y: y - rowH / 2, width: W - labelW + 6, height: rowH, fill: "transparent" }));
           const path = r.qwk >= 0
             ? `M${left},${y - barH / 2} h${w - rad} a${rad},${rad} 0 0 1 ${rad},${rad} v${barH - 2 * rad} a${rad},${rad} 0 0 1 ${-rad},${rad} h${-(w - rad)} z`
@@ -653,7 +688,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
   const storiesByErr = [...D.stories].sort((a, b) => avgErr(b) - avgErr(a));
   const storySel = document.getElementById("story-select");
   storiesByErr.forEach((s) => storySel.appendChild(el("option", { value: s.name },
-    `${s.name.replace(/_/g, " ")} · ${s.label} · avg error ${avgErr(s).toFixed(2)}`)));
+    `${s.name.replace(/_/g, " ")} · ${s.label} · ${BIN ? `differs on ${Math.round(avgErr(s) * 100)}% of answers` : `avg error ${avgErr(s).toFixed(2)}`}`)));
   storySel.addEventListener("change", renderStory);
   const chipBox = document.getElementById("hard-chips");
   storiesByErr.slice(0, 6).forEach((s) => {
@@ -665,8 +700,9 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
     const s = D.stories.find((x) => x.name === storySel.value) || storiesByErr[0];
     chipBox.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.story === s.name)));
     const mae = document.getElementById("story-mae");
-    mae.replaceChildren(el("span", {}, `${s.label} · average distance from the LLM's rating:`), ...M.map((m) => {
-      const sp = el("span"); sp.append(el("i", { class: "key-dot", style: `background:${color(m)}` }), document.createTextNode(`${m} ${s.mae[m].toFixed(2)}`)); return sp;
+    mae.replaceChildren(el("span", {}, BIN ? `${s.label} · answers that differ from the LLM's:` : `${s.label} · average distance from the LLM's rating:`), ...M.map((m) => {
+      const sp = el("span"); sp.append(el("i", { class: "key-dot", style: `background:${color(m)}` }),
+        document.createTextNode(BIN ? `${m} ${Math.round(s.mae[m] * Q)}/${Q}` : `${m} ${s.mae[m].toFixed(2)}`)); return sp;
     }));
     const t = document.getElementById("story-table");
     const thead = el("thead"), tr = el("tr");
@@ -678,11 +714,15 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
       const r = el("tr");
       r.append(el("td", { class: "mono" }, "q" + id), el("td", { class: "qcomp", style: "text-align:left;white-space:normal" }, D.components[q]));
       const llm = s.llm[q];
-      const lc = el("td", { style: "text-align:center" }); lc.appendChild(el("span", { class: "rating" }, String(llm))); r.appendChild(lc);
+      const lc = el("td", { style: "text-align:center" }); lc.appendChild(el("span", { class: "rating" }, LBL(llm))); r.appendChild(lc);
       M.forEach((m) => {
         const p = s.pred[m][q], d = p - llm;
-        const td = el("td", { style: "text-align:center", "data-tip": `${p} predicted\n${m} · LLM rated ${llm}${d ? ` (off by ${Math.abs(d)})` : " (exact)"}` });
-        td.append(el("span", { class: "rating" }, String(p)), el("span", { class: "delta" + (Math.abs(d) >= 2 ? " off2" : "") }, d === 0 ? "=" : (d > 0 ? "+" : "−") + Math.abs(d)));
+        const td = el("td", { style: "text-align:center", "data-tip": BIN
+          ? `${LBL(p)} predicted\n${m} · LLM said ${LBL(llm)}${d ? " (different)" : " (same)"}`
+          : `${p} predicted\n${m} · LLM rated ${llm}${d ? ` (off by ${Math.abs(d)})` : " (exact)"}` });
+        td.append(el("span", { class: "rating" }, LBL(p)), BIN
+          ? el("span", { class: "delta" + (d ? " off2" : "") }, d ? "✗" : "✓")
+          : el("span", { class: "delta" + (Math.abs(d) >= 2 ? " off2" : "") }, d === 0 ? "=" : (d > 0 ? "+" : "−") + Math.abs(d)));
         r.appendChild(td);
       });
       tbody.appendChild(r);
@@ -693,9 +733,12 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-direction: co
   // ---------- footer ----------
   const ft = document.getElementById("footer");
   ft.append(
-    el("p", {}, `Reference: the ${D.llm_model} survey's ratings (one call per story, 20 questions, 1 = entirely individual perspective … 5 = entirely group/community perspective).`),
-    el("p", {}, `QWK = quadratic weighted kappa: agreement on an ordered scale with partial credit for near misses, 0 = chance. 95% ranges from ${D.bootstrap} bootstrap resamples of the stories; differences use the same resamples.`),
-    el("p", {}, "Cross-validation QWK comes from 3 repeats of 5-fold cross-validation on the training stories. Generated by prototype/make_dashboard.py from evaluate.py's summary.json."));
+    el("p", {}, BIN ? `Reference: the ${D.llm_model} survey's yes/no answers (one call per story, 20 questions, 1 = yes, 0 = no).`
+                    : `Reference: the ${D.llm_model} survey's ratings (one call per story, 20 questions, 1 = entirely individual perspective … 5 = entirely group/community perspective).`),
+    HIDE.has("kappa") ? el("span", { hidden: "" }) : el("p", {}, (BIN ? "Kappa = Cohen's kappa: agreement corrected for chance, 0 = chance. "
+                     : "QWK = quadratic weighted kappa: agreement on an ordered scale with partial credit for near misses, 0 = chance. ") +
+                `95% ranges from ${D.bootstrap} bootstrap resamples of the stories; differences use the same resamples.`),
+    HIDE.has("agreement") ? el("p", {}, "Generated by prototype/make_dashboard.py from evaluate.py's summary.json.") : el("p", {}, `Cross-validation ${QL} comes from 3 repeats of 5-fold cross-validation on the training stories (shown only for models trained on the same answer type). Generated by prototype/make_dashboard.py from evaluate.py's summary.json.`));
 
   // ---------- render + re-render on theme / size changes ----------
   function renderAll() {

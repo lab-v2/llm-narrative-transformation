@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.metrics import confusion_matrix
 
-from train_m1 import METRIC_NAMES, N_CLASSES, REPO_ROOT, SEED, question_metrics, setup_file_logging
+from train_m1 import REPO_ROOT, SEED, answer_values, metric_names, question_metrics, setup_file_logging
 
 logger = logging.getLogger(__name__)
 
@@ -61,35 +61,43 @@ def load_folder(folder: Path) -> dict:
     return out
 
 
-def ratings_matrix(results: dict, names: list, question_ids: list, source: str) -> np.ndarray:
-    """-> (N, Q) classes 0..4; stops on missing/failed ratings."""
+def ratings_matrix(results: dict, names: list, question_ids: list, source: str, values: list) -> np.ndarray:
+    """-> (N, Q) class = index into values ([1..5], or [0, 1] for yes/no); stops on missing/failed ratings."""
     Y = np.zeros((len(names), len(question_ids)), dtype=np.int64)
     for i, n in enumerate(names):
         r = results[n]
         ratings = r.get("ratings") or {}
-        if r.get("n_failed", 1) != 0 or any(ratings.get(q) not in range(1, N_CLASSES + 1) for q in question_ids):
-            sys.exit(f"{source}: {n} has missing or failed ratings")
-        Y[i] = [ratings[q] - 1 for q in question_ids]
+        if r.get("n_failed", 1) != 0 or any(ratings.get(q) not in values for q in question_ids):
+            sys.exit(f"{source}: {n} has missing or failed ratings (expected values {values})")
+        Y[i] = [values.index(ratings[q]) for q in question_ids]
     return Y
 
 
-def qwk(t: np.ndarray, p: np.ndarray) -> float:
-    """Quadratic weighted kappa (same as sklearn cohen_kappa_score(weights='quadratic'); 0 if undefined)."""
-    O = np.bincount(t * N_CLASSES + p, minlength=N_CLASSES ** 2).reshape(N_CLASSES, N_CLASSES).astype(float)
-    W = np.subtract.outer(np.arange(N_CLASSES), np.arange(N_CLASSES)) ** 2
+def probs_matrix(results: dict, names: list, question_ids: list) -> np.ndarray:
+    """-> (N, Q, C) predicted probabilities (used for the yes/no AUC)."""
+    return np.array([[results[n]["probabilities"][q] for q in question_ids] for n in names], dtype=float)
+
+
+def qwk(t: np.ndarray, p: np.ndarray, n: int) -> float:
+    """Quadratic weighted kappa (same as sklearn cohen_kappa_score(weights='quadratic'); 0 if undefined).
+    With n = 2 this is plain Cohen's kappa."""
+    O = np.bincount(t * n + p, minlength=n ** 2).reshape(n, n).astype(float)
+    W = np.subtract.outer(np.arange(n), np.arange(n)) ** 2
     E = np.outer(O.sum(1), O.sum(0)) / O.sum()
     den = (W * E).sum()
     return float(1 - (W * O).sum() / den) if den > 0 else 0.0
 
 
-def mean_metrics(T: np.ndarray, P: np.ndarray):
-    """-> per question (Q, M) and mean over questions (M,)"""
-    per_q = np.array([question_metrics(T[:, q], P[:, q]) for q in range(T.shape[1])])
-    return per_q, per_q.mean(0)
+def mean_metrics(T: np.ndarray, P: np.ndarray, n: int, probs: np.ndarray = None):
+    """-> per question (Q, M) and mean over questions (M,). probs (N, Q, C) only for the yes/no AUC."""
+    per_q = np.array([question_metrics(T[:, q], P[:, q], n, None if probs is None else probs[:, q])
+                      for q in range(T.shape[1])])
+    return per_q, np.nanmean(per_q, axis=0)
 
 
-def cv_qwk(pred: dict):
-    """CV QWK of the model that made these predictions (from its *_final_config.json), if available."""
+def cv_qwk(pred: dict, scale: str = "1-5"):
+    """CV QWK of the model that made these predictions (from its *_final_config.json), if available and
+    trained on the same answer scale as the reference survey."""
     model = next(iter(pred.values()))["model"]
     model_file = Path(model["file"])
     config_file = model_file.with_name(model_file.stem + "_config.json")
@@ -97,6 +105,8 @@ def cv_qwk(pred: dict):
         return None
     with open(config_file, encoding="utf-8") as f:
         cfg = json.load(f)
+    if cfg.get("answer_scale", "1-5") != scale:
+        return None
     key = "cv_mean_nearest_prototype" if model.get("readout") == "nearest" else "cv_mean"
     return cfg.get(key, {}).get("qwk")
 
@@ -122,7 +132,12 @@ def main():
     survey = load_folder(Path(args.survey_dir))
     names = sorted(survey)
     question_ids = sorted(next(iter(survey.values()))["ratings"], key=int)
-    T = ratings_matrix(survey, names, question_ids, "survey")
+    scale = next(iter(survey.values())).get("answer_scale", "1-5")
+    vals = answer_values(scale)
+    n_cls = len(vals)
+    names_m = metric_names(n_cls)
+    binary = n_cls == 2
+    T = ratings_matrix(survey, names, question_ids, "survey", vals)
     N, Q = T.shape
 
     components = {}
@@ -135,7 +150,7 @@ def main():
         label_of = {r["story_name"]: r["label"] for r in csv.DictReader(f)}
     labels = np.array([label_of.get(n, "unknown") for n in names])
 
-    models, preds, P = [], {}, {}
+    models, preds, P, PR = [], {}, {}, {}
     for spec in args.predictions:
         if "=" not in spec:
             sys.exit(f"--predictions entries must be NAME=FOLDER, got {spec}")
@@ -146,20 +161,22 @@ def main():
                      f"extra={sorted(set(pred) - set(names))}")
         models.append(name)
         preds[name] = pred
-        P[name] = ratings_matrix(pred, names, question_ids, name)
-    logger.info(f"{N} stories ({dict(zip(*np.unique(labels, return_counts=True)))}), {Q} questions | models: {models}")
+        P[name] = ratings_matrix(pred, names, question_ids, name, vals)
+        PR[name] = probs_matrix(pred, names, question_ids) if binary else None
+    logger.info(f"{N} stories ({dict(zip(*np.unique(labels, return_counts=True)))}), {Q} questions, "
+                f"answers {scale} | models: {models}")
 
     # ---------- Accuracy + bootstrap ----------
     per_q, mean = {}, {}
     for m in models:
-        per_q[m], mean[m] = mean_metrics(T, P[m])
+        per_q[m], mean[m] = mean_metrics(T, P[m], n_cls, PR[m])
 
     rng = np.random.default_rng(SEED)
     boot = np.zeros((args.bootstrap, len(models)))
     for b in range(args.bootstrap):
         idx = rng.integers(0, N, size=N)
         for j, m in enumerate(models):
-            boot[b, j] = np.mean([qwk(T[idx, q], P[m][idx, q]) for q in range(Q)])
+            boot[b, j] = np.mean([qwk(T[idx, q], P[m][idx, q], n_cls) for q in range(Q)])
     ci = {m: np.percentile(boot[:, j], [2.5, 97.5]) for j, m in enumerate(models)}
     ref = models[0]
     diffs = {m: (mean[m][0] - mean[ref][0], np.percentile(boot[:, j] - boot[:, 0], [2.5, 97.5]))
@@ -167,10 +184,10 @@ def main():
 
     overall_rows = []
     for m in models:
-        cvq = cv_qwk(preds[m])
+        cvq = cv_qwk(preds[m], scale)
         overall_rows.append({"model": m, "qwk": round(mean[m][0], 4), "qwk_ci_low": round(ci[m][0], 4),
                              "qwk_ci_high": round(ci[m][1], 4), "cv_qwk": cvq,
-                             **{k: round(float(v), 4) for k, v in zip(METRIC_NAMES[1:], mean[m][1:])}})
+                             **{k: round(float(v), 4) for k, v in zip(names_m[1:], mean[m][1:])}})
 
     # ---------- Timing / cost / size ----------
     def summary(values):
@@ -201,9 +218,9 @@ def main():
     for g in sorted(set(labels)):
         sel = labels == g
         for m in models:
-            _, gm = mean_metrics(T[sel], P[m][sel])
+            _, gm = mean_metrics(T[sel], P[m][sel], n_cls, None if PR[m] is None else PR[m][sel])
             group_rows.append({"group": g, "n_stories": int(sel.sum()), "model": m,
-                               **{k: round(float(v), 4) for k, v in zip(METRIC_NAMES, gm)}})
+                               **{k: round(float(v), 4) for k, v in zip(names_m, gm)}})
 
     # ---------- Write CSVs ----------
     def write_csv(filename, rows):
@@ -212,7 +229,7 @@ def main():
             writer.writeheader()
             writer.writerows(rows)
 
-    test_counts = ["/".join(str(c) for c in np.bincount(T[:, q], minlength=N_CLASSES)) for q in range(Q)]
+    test_counts = ["/".join(str(c) for c in np.bincount(T[:, q], minlength=n_cls)) for q in range(Q)]
     write_csv("overall.csv", overall_rows)
     write_csv("timing.csv", timing_rows)
     write_csv("by_group.csv", group_rows)
@@ -222,8 +239,8 @@ def main():
          **{f"{m}_balanced_acc": round(float(per_q[m][q, 1]), 4) for m in models}}
         for q in range(Q)])
     write_csv("per_story_predictions.csv", [
-        {"story_name": n, "label": labels[i], "question_id": question_ids[q], "llm_rating": int(T[i, q]) + 1,
-         **{m: int(P[m][i, q]) + 1 for m in models}}
+        {"story_name": n, "label": labels[i], "question_id": question_ids[q], "llm_rating": vals[T[i, q]],
+         **{m: vals[P[m][i, q]] for m in models}}
         for i, n in enumerate(names) for q in range(Q)])
 
     # ---------- Machine-readable summary (used by make_dashboard.py) ----------
@@ -231,18 +248,19 @@ def main():
         "n_stories": N, "question_ids": question_ids,
         "components": [components.get(q, "") for q in question_ids], "test_counts": test_counts,
         "models": models, "reference_model": ref, "llm_model": next(iter(survey.values()))["model"],
-        "bootstrap": args.bootstrap, "metric_names": METRIC_NAMES,
+        "bootstrap": args.bootstrap, "metric_names": names_m,
+        "answer_scale": scale, "answer_values": vals, "n_classes": n_cls,
         "overall": overall_rows,
         "diffs": {m: {"diff": round(float(d), 4), "low": round(float(lo), 4), "high": round(float(hi), 4)}
                   for m, (d, (lo, hi)) in diffs.items()},
         "timing": timing_rows,
         "by_group": group_rows,
-        "per_question": {m: [{k: round(float(v), 4) for k, v in zip(METRIC_NAMES, per_q[m][q])} for q in range(Q)]
+        "per_question": {m: [{k: round(float(v), 4) for k, v in zip(names_m, per_q[m][q])} for q in range(Q)]
                          for m in models},
-        "confusion": {m: [confusion_matrix(T[:, q], P[m][:, q], labels=range(N_CLASSES)).tolist() for q in range(Q)]
+        "confusion": {m: [confusion_matrix(T[:, q], P[m][:, q], labels=range(n_cls)).tolist() for q in range(Q)]
                       for m in models},
-        "stories": [{"name": n, "label": str(labels[i]), "llm": (T[i] + 1).tolist(),
-                     "pred": {m: (P[m][i] + 1).tolist() for m in models},
+        "stories": [{"name": n, "label": str(labels[i]), "llm": [vals[c] for c in T[i]],
+                     "pred": {m: [vals[c] for c in P[m][i]] for m in models},
                      "mae": {m: round(float(np.abs(P[m][i] - T[i]).mean()), 3) for m in models}}
                     for i, n in enumerate(names)],
     }
@@ -252,15 +270,25 @@ def main():
     # ---------- Report ----------
     L = [f"Test comparison | {N} stories ({', '.join(f'{g}: {int((labels == g).sum())}' for g in sorted(set(labels)))}) | "
          f"{Q} questions | reference: LLM survey", ""]
-    L += ["1. Accuracy vs the LLM survey (mean over questions; QWK 0 = chance, 1 = perfect)",
-          f"  {'model':<12} {'test QWK [95% range]':>22} {'CV QWK':>7} {'bal_acc':>7} {'exact':>6} {'within1':>7} {'QWK3':>6} {'bal_acc3':>8}"]
-    for r in overall_rows:
-        cvq = f"{r['cv_qwk']:.3f}" if r["cv_qwk"] is not None else "-"
-        L.append(f"  {r['model']:<12} {r['qwk']:>6.3f} [{r['qwk_ci_low']:.3f}-{r['qwk_ci_high']:.3f}] {cvq:>7} "
-                 f"{r['balanced_acc']:>7.3f} {r['exact_acc']:>6.3f} {r['within1_acc']:>7.3f} {r['qwk_3level']:>6.3f} "
-                 f"{r['balanced_acc_3level']:>8.3f}")
+    if binary:
+        L += ["1. Agreement with the LLM's yes/no answers (mean over questions; kappa 0 = chance, 1 = perfect; "
+              "balanced acc and AUC 0.5 = chance)",
+              f"  {'model':<12} {'test kappa [95% range]':>24} {'CV kappa':>8} {'bal_acc':>7} {'accuracy':>8} {'F1 yes':>6} {'AUC':>6}"]
+        for r in overall_rows:
+            cvq = f"{r['cv_qwk']:.3f}" if r["cv_qwk"] is not None else "-"
+            L.append(f"  {r['model']:<12} {r['qwk']:>6.3f} [{r['qwk_ci_low']:.3f}-{r['qwk_ci_high']:.3f}]   {cvq:>8} "
+                     f"{r['balanced_acc']:>7.3f} {r['exact_acc']:>8.3f} {r['f1_yes']:>6.3f} {r['auc']:>6.3f}")
+    else:
+        L += ["1. Accuracy vs the LLM survey (mean over questions; QWK 0 = chance, 1 = perfect)",
+              f"  {'model':<12} {'test QWK [95% range]':>22} {'CV QWK':>7} {'bal_acc':>7} {'exact':>6} {'within1':>7} {'QWK3':>6} {'bal_acc3':>8}"]
+        for r in overall_rows:
+            cvq = f"{r['cv_qwk']:.3f}" if r["cv_qwk"] is not None else "-"
+            L.append(f"  {r['model']:<12} {r['qwk']:>6.3f} [{r['qwk_ci_low']:.3f}-{r['qwk_ci_high']:.3f}] {cvq:>7} "
+                     f"{r['balanced_acc']:>7.3f} {r['exact_acc']:>6.3f} {r['within1_acc']:>7.3f} {r['qwk_3level']:>6.3f} "
+                     f"{r['balanced_acc_3level']:>8.3f}")
     if diffs:
-        L += ["", f"  Paired difference in test QWK vs {ref} (same bootstrap resamples; range excluding 0 = a real difference):"]
+        L += ["", f"  Paired difference in test {'kappa' if binary else 'QWK'} vs {ref} "
+                  f"(same bootstrap resamples; range excluding 0 = a real difference):"]
         for m, (d, (lo, hi)) in diffs.items():
             L.append(f"    {m:<12} {d:+.3f} [{lo:+.3f} to {hi:+.3f}]")
 
@@ -273,17 +301,24 @@ def main():
                  f"{fmt(r['embed_mean_s'], '.3f'):>7} {fmt(r['predict_mean_ms'], '.3f'):>10} {r['cost_per_story_usd']:>9.5f} "
                  f"{r['cost_total_usd']:>8.4f} {fmt(r['model_size_mb'], '.2f'):>7} {r['speedup_vs_llm']:>7.1f}x")
 
-    L += ["", "3. QWK per question",
+    L += ["", "3. Kappa per question" if binary else "3. QWK per question",
           f"  {'q':>4} {'test 1/2/3/4/5':>15} " + " ".join(f"{m:>11}" for m in models) + "  component"]
     for q in range(Q):
         L.append(f"  {question_ids[q]:>4} {test_counts[q]:>15} " + " ".join(f"{per_q[m][q, 0]:>11.3f}" for m in models)
                  + f"  {components.get(question_ids[q], '')}")
 
-    L += ["", "4. By story type (small groups are only indicative)",
-          f"  {'group':<16} {'n':>3} {'model':<12} {'QWK':>6} {'bal_acc':>7} {'exact':>6} {'within1':>7} {'QWK3':>6}"]
-    for r in group_rows:
-        L.append(f"  {r['group']:<16} {r['n_stories']:>3} {r['model']:<12} {r['qwk']:>6.3f} {r['balanced_acc']:>7.3f} "
-                 f"{r['exact_acc']:>6.3f} {r['within1_acc']:>7.3f} {r['qwk_3level']:>6.3f}")
+    if binary:
+        L += ["", "4. By story type (small groups are only indicative)",
+              f"  {'group':<16} {'n':>3} {'model':<12} {'kappa':>6} {'bal_acc':>7} {'accuracy':>8} {'F1 yes':>6}"]
+        for r in group_rows:
+            L.append(f"  {r['group']:<16} {r['n_stories']:>3} {r['model']:<12} {r['qwk']:>6.3f} {r['balanced_acc']:>7.3f} "
+                     f"{r['exact_acc']:>8.3f} {r['f1_yes']:>6.3f}")
+    else:
+        L += ["", "4. By story type (small groups are only indicative)",
+              f"  {'group':<16} {'n':>3} {'model':<12} {'QWK':>6} {'bal_acc':>7} {'exact':>6} {'within1':>7} {'QWK3':>6}"]
+        for r in group_rows:
+            L.append(f"  {r['group']:<16} {r['n_stories']:>3} {r['model']:<12} {r['qwk']:>6.3f} {r['balanced_acc']:>7.3f} "
+                     f"{r['exact_acc']:>6.3f} {r['within1_acc']:>7.3f} {r['qwk_3level']:>6.3f}")
     summary_len = len(L)
 
     L += ["", "5. Stories each model gets most wrong (mean |predicted - LLM rating| over the questions)"]
@@ -296,7 +331,7 @@ def main():
     for q in range(Q):
         L.append(f"  q{question_ids[q]} {components.get(question_ids[q], '')}")
         for m in models:
-            cm = confusion_matrix(T[:, q], P[m][:, q], labels=range(N_CLASSES))
+            cm = confusion_matrix(T[:, q], P[m][:, q], labels=range(n_cls))
             L.append(f"    {m}:  " + " | ".join(" ".join(f"{v:>2}" for v in row) for row in cm))
     (output_dir / "report.txt").write_text("\n".join(L) + "\n", encoding="utf-8")
 

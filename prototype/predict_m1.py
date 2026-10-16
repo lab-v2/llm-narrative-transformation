@@ -85,7 +85,8 @@ def survey_story_model(client: OpenAI, story_path: Path, model, ckpt, cfg, info,
         predict_start = time.perf_counter()
         probs = predict_fn(model, ckpt, torch.tensor(emb["embedding"], dtype=torch.float32))
         classes = decode(probs.numpy(), cfg.get("decode", "argmax"))  # model's own rating rule
-        ratings = {q: int(classes[j]) + 1 for j, q in enumerate(question_ids)}
+        values = cfg.get("answer_values", list(range(1, cfg["n_classes"] + 1)))  # [1..5], or [0, 1] for yes/no
+        ratings = {q: values[int(classes[j])] for j, q in enumerate(question_ids)}
         predict_s = time.perf_counter() - predict_start
         probabilities = {q: [round(float(p), 4) for p in probs[j]] for j, q in enumerate(question_ids)}
     except Exception as e:
