@@ -1,0 +1,68 @@
+{
+  "source": "LLM-free survey prototype, russio dataset: the 4 yes/no questions (1 from russio_questions_war.json, 2-4 from russio_questions_extra.json)",
+  "text_label": "TEXT",
+  "questions": [
+    {
+      "id": 1,
+      "component": "Russia-Ukraine war relevance",
+      "relevance_question": {
+        "question": "Is this text about the Russia–Ukraine war: the fighting, the parties involved, or the sanctions, diplomacy, aid or other consequences that follow from it?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        },
+        "instructions": [
+          "You are an expert analyst of news and media texts in any language.",
+          "Given a text, answer the question about it with yes or no.",
+          "Answers:",
+          "1 = Yes",
+          "0 = No"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "component": "Mentions the US, NATO or the EU",
+      "relevance_question": {
+        "question": "Does this text mention the United States, NATO or the European Union?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        },
+        "instructions": [
+          "You are an expert analyst of news and media texts in any language.",
+          "Given a text, answer the question about it with yes or no.",
+          "Answers:",
+          "1 = Yes",
+          "0 = No"
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "component": "Economic matters",
+      "relevance_question": {
+        "question": "Is this text about economic matters, such as trade, energy, prices, markets or sanctions?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "component": "Russia portrayed positively",
+      "relevance_question": {
+        "question": "Does this text portray Russia or the Russian government positively?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,442 @@
+{
+  "source": "LLM-free survey prototype, russio dataset: 33 candidate yes/no questions for questions 5-20, piloted on the 200-article train sample (ids 101-133; the final 16 are renumbered 5-20)",
+  "text_label": "TEXT",
+  "questions": [
+    {
+      "id": 101,
+      "component": "NATO or the West as aggressor",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray NATO or the West as the aggressor or as provoking conflict?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        },
+        "instructions": [
+          "You are an expert analyst of news and media texts in any language.",
+          "Given a text, answer the question about it with yes or no.",
+          "Answers:",
+          "1 = Yes",
+          "0 = No"
+        ]
+      }
+    },
+    {
+      "id": 102,
+      "component": "Sanctions hurt the West more",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text claim that sanctions against Russia harm Europe or the West more than they harm Russia?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 103,
+      "component": "Ukrainian leadership illegitimate",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray Ukraine's government or leadership as illegitimate, corrupt or controlled by foreign powers?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 104,
+      "component": "Russian military success",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text describe the Russian military as successful, advancing or achieving its goals?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 105,
+      "component": "Ukrainian military losses",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text describe Ukrainian military losses, failures or retreats?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 106,
+      "component": "Calls for negotiations",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text call for, or report calls for, peace talks, negotiations or a ceasefire?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 107,
+      "component": "Western hypocrisy",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray Western countries or leaders as hypocritical or applying double standards?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 108,
+      "component": "West weak or in decline",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray the West or Europe as weak, divided or in decline?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 109,
+      "component": "Multipolar world",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text present a multipolar world (for example BRICS, China or the Global South) as an alternative to Western dominance?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 110,
+      "component": "Russia as victim",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray Russia or Russians as victims of hostility, discrimination or Russophobia?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 111,
+      "component": "Nuclear threat",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text mention nuclear weapons or the risk of nuclear escalation?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 112,
+      "component": "Aid to Ukraine negative",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray Western military or financial aid to Ukraine negatively, for example as wasteful or as prolonging the war?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 113,
+      "component": "Problems inside the West",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text describe social or economic problems inside Western countries, such as inflation, protests, migration or crime?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 114,
+      "component": "Traditional values",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray Russia as a defender of traditional, religious or family values?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 115,
+      "component": "Western media or governments lie",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text accuse Western media or Western governments of lying, censorship or propaganda?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 116,
+      "component": "Russia as peacemaker",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text portray Russia as a peacemaker or a responsible global actor?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 117,
+      "component": "Negative future for the West",
+      "kind": "narrative",
+      "relevance_question": {
+        "question": "Does this text predict negative future consequences for the West or Europe?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 118,
+      "component": "West portrayed negatively",
+      "kind": "stance",
+      "relevance_question": {
+        "question": "Does this text portray the West (the United States, NATO or the European Union) negatively?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 119,
+      "component": "Ukraine portrayed negatively",
+      "kind": "stance",
+      "relevance_question": {
+        "question": "Does this text portray Ukraine or the Ukrainian government negatively?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 120,
+      "component": "Mentions Putin",
+      "kind": "entity",
+      "relevance_question": {
+        "question": "Does this text mention Vladimir Putin?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 121,
+      "component": "Mentions Zelensky",
+      "kind": "entity",
+      "relevance_question": {
+        "question": "Does this text mention Volodymyr Zelensky?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 122,
+      "component": "Mentions China",
+      "kind": "entity",
+      "relevance_question": {
+        "question": "Does this text mention China?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 123,
+      "component": "Energy, oil or gas",
+      "kind": "topic",
+      "relevance_question": {
+        "question": "Does this text discuss energy, oil or gas?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 124,
+      "component": "European domestic politics",
+      "kind": "topic",
+      "relevance_question": {
+        "question": "Does this text discuss elections or domestic politics in a European country?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 125,
+      "component": "Middle East",
+      "kind": "topic",
+      "relevance_question": {
+        "question": "Does this text discuss the Middle East, for example Israel, Gaza, Iran or Syria?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 126,
+      "component": "Russia's other neighbours",
+      "kind": "topic",
+      "relevance_question": {
+        "question": "Does this text discuss the Baltic states, Poland, Finland, Moldova or Georgia?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 127,
+      "component": "US domestic politics",
+      "kind": "topic",
+      "relevance_question": {
+        "question": "Does this text discuss US domestic politics, such as the US president, Congress or US elections?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 128,
+      "component": "Military matters",
+      "kind": "topic",
+      "relevance_question": {
+        "question": "Does this text discuss military matters, such as armed forces, weapons, combat or defence?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 129,
+      "component": "Affairs inside Russia",
+      "kind": "topic",
+      "relevance_question": {
+        "question": "Is this text mainly about events or affairs inside Russia?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 130,
+      "component": "Opinion or commentary",
+      "kind": "style",
+      "relevance_question": {
+        "question": "Is this text mainly opinion or commentary rather than factual news reporting?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 131,
+      "component": "Cites Russian officials",
+      "kind": "style",
+      "relevance_question": {
+        "question": "Does this text quote or cite Russian officials or Russian government sources?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 132,
+      "component": "Cites Western sources",
+      "kind": "style",
+      "relevance_question": {
+        "question": "Does this text quote or cite Western officials or Western media as sources?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    },
+    {
+      "id": 133,
+      "component": "Emotionally charged language",
+      "kind": "style",
+      "relevance_question": {
+        "question": "Does this text use emotionally charged or loaded language?",
+        "type": "binary",
+        "answers": {
+          "1": "Yes",
+          "0": "No"
+        }
+      }
+    }
+  ]
+}
